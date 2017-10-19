@@ -1,0 +1,23 @@
+{
+  "name": "react-native-simple-bluetooth-manager",
+  "version": "0.0.1",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/RobinBobin/react-native-simple-bluetooth-manager.git"
+  },
+  "keywords": [
+    "React Native",
+    "Bluetooth"
+  ],
+  "author": "Ruben Shalimov <r_shalimov@inbox.ru>",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/RobinBobin/react-native-simple-bluetooth-manager/issues"
+  },
+  "homepage": "https://github.com/RobinBobin/react-native-simple-bluetooth-manager#readme"
+}
