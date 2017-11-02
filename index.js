@@ -115,8 +115,28 @@ export default class BluetoothDevice {
       return this._safeReadWrite(true, arguments);
    }
    
-   writeCharacteristic(serviceUuid, characteristicUuid, dataAndOptions) {
-      return this._safeReadWrite(false, arguments);
+   async writeCharacteristic(serviceUuid, characteristicUuid, dataAndOptions) {
+      if (!dataAndOptions
+         || (dataAndOptions.chunkSize == undefined)
+         || !Array.isArray(dataAndOptions.value)
+         || dataAndOptions.value.length <= dataAndOptions.chunkSize)
+      {
+         return await this._safeReadWrite(false, arguments);
+      }
+      
+      if (dataAndOptions.chunkSize <= 0) {
+         throw new Error(`dataAndOptions.chunkSize (${
+            dataAndOptions.chunkSize}) can't be <= 0`);
+      }
+      
+      for (let i = 0; i < dataAndOptions.value.length;) {
+         await this._safeReadWrite(false, [
+            serviceUuid,
+            characteristicUuid,
+            Object.assign({}, dataAndOptions, {value: dataAndOptions.
+               value.slice(i, i += dataAndOptions.chunkSize)})
+         ]);
+      }
    }
    
    closeGatt() {
@@ -133,16 +153,15 @@ export default class BluetoothDevice {
          obj: params[2]
       } : (requests.shift(), requests[0]);
       
-      const result = request == undefined || (params.length && requests.
-         length) ? undefined : await bt[operation + "Characteristic"](
+      if (request != undefined && (!params.length || !requests.length)) {
+         await bt[operation + "Characteristic"](
             this.getId(),
             request.serviceUuid,
             request.characteristicUuid,
             request.obj);
+      }
       
       params.length && requests.push(request);
-      
-      return result;
    }
    
    _innerListener(listener, data) {
