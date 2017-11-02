@@ -260,12 +260,12 @@ class Module extends ReactContextBaseJavaModule {
          
          if (!ch.setValue(valueBuffer)) {
             throw new IllegalStateException(String.format(
-               "!ch.setValue() for %s", logString));
+               "Characteristic.setValue() failed for %s", logString));
          }
          
          if (!gatt.writeCharacteristic(ch)) {
             throw new IllegalStateException(String.format(
-               "!gatt.writeCharacteristic() for %s", logString));
+               "BluetoothGatt.writeCharacteristic() failed for %s", logString));
          }
          
          Log.d(TAG, String.format("writeCharacteristic%s", logString));
