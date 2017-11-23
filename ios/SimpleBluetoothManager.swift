@@ -11,13 +11,13 @@ import Foundation
 @objc(SimpleBluetoothManager) class SimpleBluetoothManager: RCTEventEmitter {
   override func supportedEvents() -> [String]! {
     return [
-      "CONNECTED",
-      "CONNECTING",
-      "DISCONNECTED",
-      "DISCONNECTING",
-      "SERVICES_DISCOVERED",
-      "CHARACTERISTIC_READ",
-      "CHARACTERISTIC_WRITTEN"
+      CONNECTED,
+      CONNECTING,
+      DISCONNECTED,
+      DISCONNECTING,
+      SERVICES_DISCOVERED,
+      CHARACTERISTIC_READ,
+      CHARACTERISTIC_WRITTEN
     ];
   }
   
