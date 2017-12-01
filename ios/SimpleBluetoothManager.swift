@@ -6,9 +6,21 @@
 //  Copyright © 2017 Facebook. All rights reserved.
 //
 
-import Foundation
+import Foundation;
+import CoreBluetooth;
 
-@objc(SimpleBluetoothManager) class SimpleBluetoothManager: RCTEventEmitter {
+@objc(SimpleBluetoothManager) class SimpleBluetoothManager:
+  RCTEventEmitter,
+  CBCentralManagerDelegate
+{
+  var manager:CBCentralManager?;
+  
+  override init() {
+    super.init();
+    
+    manager = CBCentralManager(delegate: self, queue: nil);
+  }
+  
   override func supportedEvents() -> [String]! {
     return [
       CONNECTED,
@@ -21,12 +33,16 @@ import Foundation
     ];
   }
   
+  func centralManagerDidUpdateState(_ central: CBCentralManager) {
+    // Nothing to do;
+  }
+  
   @objc func isValid(_ address: String, resolver: RCTPromiseResolveBlock, rejecter: RCTPromiseRejectBlock) -> Void {
     resolver(nil);
   }
 
   @objc func isEnabled(_ resolver: RCTPromiseResolveBlock, rejecter: RCTPromiseRejectBlock) -> Void {
-    resolver(true);
+    resolver(manager!.state == CBManagerState.poweredOn);
   }
   
   @objc func connectGatt(
