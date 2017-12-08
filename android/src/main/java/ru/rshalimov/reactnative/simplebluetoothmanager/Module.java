@@ -14,21 +14,29 @@ import com.facebook.react.modules.core.RCTNativeAppEventEmitter;
 import android.util.Log;
 
 import android.bluetooth.BluetoothAdapter;
+import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothGatt;
 import android.bluetooth.BluetoothGattCallback;
 import android.bluetooth.BluetoothGattCharacteristic;
 import android.bluetooth.BluetoothGattService;
 import android.bluetooth.BluetoothProfile;
+import android.bluetooth.le.BluetoothLeScanner;
+import android.bluetooth.le.ScanFilter;
+import android.bluetooth.le.ScanRecord;
+import android.bluetooth.le.ScanResult;
+import android.bluetooth.le.ScanSettings;
 
 import java.util.Arrays;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.HashMap;
 import java.util.UUID;
 
+import ru.rshalimov.reactnative.common.Utils;
+
 class Module extends ReactContextBaseJavaModule {
-   private final class BTGattCallback extends BluetoothGattCallback
-   {
+   private final class BTGattCallback extends BluetoothGattCallback {
       @Override
       public void onConnectionStateChange(
          BluetoothGatt gatt,
@@ -49,7 +57,7 @@ class Module extends ReactContextBaseJavaModule {
             null;
          
          if (eventName != null) {
-            emit(eventName, putCommonParams(eventName, gatt, status));
+            emit(eventName, putCommonParams(gatt, status));
          }
       }
       
@@ -87,13 +95,41 @@ class Module extends ReactContextBaseJavaModule {
          Log.d(TAG, String.format("onCharacteristicWrite(%s, %s, %s, %d)",
             gatt.getDevice().getAddress(), serviceUuid, ch.getUuid(), status));
          
-         final WritableMap params = putCommonParams(
-            CHARACTERISTIC_WRITTEN, gatt, status);
+         final WritableMap params = putCommonParams(gatt, status);
          
          params.putString("serviceUuid", serviceUuid);
          params.putString("characteristicUuid", ch.getUuid().toString());
          
          emit(CHARACTERISTIC_WRITTEN, params);
+      }
+   }
+   
+   private final class ScanCallback extends android.bluetooth.le.ScanCallback {
+      @Override
+      public void onBatchScanResults(List <ScanResult> results) {
+         final WritableMap params = wrapScanResults(results);
+         
+         params.putBoolean("isBatch", true);
+         
+         emit(SCAN_RESULT, params);
+      }
+      
+      @Override
+      public void onScanFailed(int errorCode) {
+         final WritableMap params = Arguments.createMap();
+         
+         params.putInt("errorCode", errorCode);
+         
+         emit(SCAN_FAILED, params);
+      }
+      
+      @Override
+      public void onScanResult(int callbackType, ScanResult result) {
+         final WritableMap params = wrapScanResults(Arrays.asList(result));
+         
+         params.putInt("callbackType", callbackType);
+         
+         emit(SCAN_RESULT, params);
       }
    }
    
@@ -105,10 +141,13 @@ class Module extends ReactContextBaseJavaModule {
       DISCONNECTING = "DISCONNECTING",
       SERVICES_DISCOVERED = "SERVICES_DISCOVERED",
       CHARACTERISTIC_READ = "CHARACTERISTIC_READ",
-      CHARACTERISTIC_WRITTEN = "CHARACTERISTIC_WRITTEN";
+      CHARACTERISTIC_WRITTEN = "CHARACTERISTIC_WRITTEN",
+      SCAN_FAILED = "SCAN_FAILED",
+      SCAN_RESULT = "SCAN_RESULT";
    
    private final Map <String, BluetoothGatt> gatts = new HashMap <> ();
    private final BTGattCallback btGattCallback = new BTGattCallback();
+   private final ScanCallback scanCallback = new ScanCallback();
    
    Module(ReactApplicationContext reactContext) {
       super(reactContext);
@@ -121,7 +160,6 @@ class Module extends ReactContextBaseJavaModule {
    
    @Override
    public Map <String, Object> getConstants() {
-      final Map <String, Object> constants = new HashMap <> ();
       final WritableMap events = Arguments.createMap();
       
       for (String [] data : new String [][] {
@@ -136,6 +174,10 @@ class Module extends ReactContextBaseJavaModule {
             SERVICES_DISCOVERED,
             CHARACTERISTIC_READ,
             CHARACTERISTIC_WRITTEN
+         }, {
+            "leScanCallback",
+            SCAN_FAILED,
+            SCAN_RESULT
          }
       }) {
          final WritableMap map = Arguments.createMap();
@@ -147,7 +189,15 @@ class Module extends ReactContextBaseJavaModule {
          events.putMap(data[0], map);
       }
       
+      final WritableMap scanModes = Arguments.createMap();
+      
+      scanModes.putInt("LOW_POWER", 0);
+      scanModes.putInt("BALANCED", 1);
+      scanModes.putInt("LOW_LATENCY", 2);
+      
+      final Map <String, Object> constants = new HashMap <> ();
       constants.put("events", events);
+      constants.put("scanMode", scanModes);
       
       return constants;
    }
@@ -170,6 +220,41 @@ class Module extends ReactContextBaseJavaModule {
    }
    
    @ReactMethod
+   public void startScan(ReadableMap options, Promise promise) {
+      try {
+         final BluetoothLeScanner scanner =
+            getAdapterEnsureEnabled().getBluetoothLeScanner();
+         
+         final List <ScanFilter> scanFilters = getScanFilters(Utils.
+            safeGet(options, "filters", Arguments.createArray()));
+         
+         final ScanSettings scanSettings = getScanSettings(Utils.
+            safeGet(options, "settings", Arguments.createMap()));
+         
+         Log.d(TAG, String.format("startScan(%s)", options));
+         
+         scanner.startScan(scanFilters, scanSettings, scanCallback);
+         
+         promise.resolve(null);
+      } catch (IllegalStateException | IllegalArgumentException e) {
+         promise.reject("", e.getMessage());
+      }
+   }
+   
+   @ReactMethod
+   public void stopScan(Promise promise) {
+      try {
+         getAdapterEnsureEnabled().getBluetoothLeScanner().stopScan(scanCallback);
+         
+         Log.d(TAG, "stopScan()");
+         
+         promise.resolve(null);
+      } catch (IllegalStateException e) {
+         promise.reject("", e.getMessage());
+      }
+   }
+   
+   @ReactMethod
    public void connectGatt(String address, Boolean autoConnect, Promise promise) {
       final String addr = address.toUpperCase();
       
@@ -179,12 +264,7 @@ class Module extends ReactContextBaseJavaModule {
                format("Invalid device id: '%s'", addr));
          }
          
-         final BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
-         
-         if (!adapter.isEnabled()) {
-            throw new IllegalStateException("Bluetooth is not enabled");
-         }
-         
+         final BluetoothAdapter adapter = getAdapterEnsureEnabled();
          final boolean connect = !gatts.containsKey(addr);
          
          if (connect) {
@@ -248,17 +328,13 @@ class Module extends ReactContextBaseJavaModule {
          final BluetoothGattCharacteristic ch = getCharacteristic(
             gatt, serviceUuid, characteristicUuid);
          
-         final ReadableArray value = dataAndOptions.getArray("value");
-         final byte [] valueBuffer = new byte[value.size()];
-         
-         for (int index = 0; index < valueBuffer.length; index++) {
-            valueBuffer[index] = (byte)value.getInt(index);
-         }
+         final byte [] value = Utils.createByteArray(
+            dataAndOptions.getArray("value"));
          
          final String logString = String.format("(%s, %s, %s, %s)", address,
-            serviceUuid, characteristicUuid, Arrays.toString(valueBuffer));
+            serviceUuid, characteristicUuid, Arrays.toString(value));
          
-         if (!ch.setValue(valueBuffer)) {
+         if (!ch.setValue(value)) {
             throw new IllegalStateException(String.format(
                "Characteristic.setValue() failed for %s", logString));
          }
@@ -308,14 +384,9 @@ class Module extends ReactContextBaseJavaModule {
       return gatt;
    }
    
-   private WritableMap putCommonParams(
-      String eventName,
-      BluetoothGatt gatt,
-      int status)
-   {
+   private WritableMap putCommonParams(BluetoothGatt gatt, int status) {
       final WritableMap params = Arguments.createMap();
       
-      params.putString("eventName", eventName);
       params.putString("id", gatt.getDevice().getAddress());
       params.putInt("status", status);
       params.putBoolean("error", status != BluetoothGatt.GATT_SUCCESS);
@@ -350,14 +421,51 @@ class Module extends ReactContextBaseJavaModule {
          services.pushMap(srvc);
       }
       
-      final WritableMap params = putCommonParams(SERVICES_DISCOVERED, gatt, status);
+      final WritableMap params = putCommonParams(gatt, status);
       
       params.putArray("services", services);
       
       emit(SERVICES_DISCOVERED, params);
    }
    
+   private WritableMap wrapScanResults(List <ScanResult> scanResults) {
+      final WritableArray results = Arguments.createArray();
+      
+      for (ScanResult scanResult : scanResults) {
+         // = device = //
+         final WritableMap device = Arguments.createMap();
+         final BluetoothDevice btDevice = scanResult.getDevice();
+         
+         device.putString("id", btDevice.getAddress());
+         device.putString("name", btDevice.getName());
+         
+         // = scan record = //
+         final WritableMap scanRecord = Arguments.createMap();
+         final ScanRecord scRecord = scanResult.getScanRecord();
+         
+         scanRecord.putArray("bytes", Utils.writableArrayFrom(scRecord.getBytes()));
+         scanRecord.putString("name", scRecord.getDeviceName());
+         
+         // = result = //
+         final WritableMap result = Arguments.createMap();
+         
+         result.putMap("device", device);
+         result.putInt("rssi", scanResult.getRssi());
+         result.putMap("scanRecord", scanRecord);
+         
+         results.pushMap(result);
+      }
+      
+      final WritableMap params = Arguments.createMap();
+      
+      params.putArray("results", results);
+      
+      return params;
+   }
+   
    private void emit(String eventName, WritableMap params) {
+      params.putString("eventName", eventName);
+      
       getReactApplicationContext()
          .getJSModule(RCTNativeAppEventEmitter.class)
          .emit(eventName, params);
@@ -393,5 +501,49 @@ class Module extends ReactContextBaseJavaModule {
       }
       
       return ch;
+   }
+   
+   private BluetoothAdapter getAdapterEnsureEnabled() {
+      final BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
+      
+      if (!adapter.isEnabled()) {
+         throw new IllegalStateException("Bluetooth is not enabled");
+      }
+      
+      return adapter;
+   }
+   
+   private List <ScanFilter> getScanFilters(ReadableArray filters) {
+      final List <ScanFilter> scanFilters = new ArrayList <> ();      
+      for (int index = 0; index < filters.size(); index++) {
+         final ScanFilter.Builder builder = new ScanFilter.Builder();
+         final ReadableMap filter = filters.getMap(index);
+         
+         if (filter.hasKey("deviceAddress")) {
+            builder.setDeviceAddress(filter.getString("deviceAddress"));
+         }
+         
+         if (filter.hasKey("deviceName")) {
+            builder.setDeviceName(filter.getString("deviceName"));
+         }
+         
+         scanFilters.add(builder.build());
+      }
+      
+      return scanFilters;
+   }
+   
+   private ScanSettings getScanSettings(ReadableMap settings) {
+      final ScanSettings.Builder builder = new ScanSettings.Builder();
+      
+      if (settings.hasKey("reportDelay")) {
+         builder.setReportDelay(Long.parseLong(settings.getString("reportDelay")));
+      }
+      
+      if (settings.hasKey("scanMode")) {
+         builder.setScanMode(settings.getInt("scanMode"));
+      }
+      
+      return builder.build();
    }
 }
