@@ -1,14 +1,6 @@
 #import <Foundation/Foundation.h>
 #import <React/RCTEventEmitter.h>
 
-extern const NSString * CONNECTED;
-extern const NSString * CONNECTING;
-extern const NSString * DISCONNECTED;
-extern const NSString * DISCONNECTING;
-extern const NSString * SERVICES_DISCOVERED;
-extern const NSString * CHARACTERISTIC_READ;
-extern const NSString * CHARACTERISTIC_WRITTEN;
-
 @interface RCT_EXTERN_MODULE(SimpleBluetoothManager, RCTEventEmitter)
 
 RCT_EXTERN_METHOD(isValid:
@@ -17,6 +9,15 @@ RCT_EXTERN_METHOD(isValid:
   rejecter: (RCTPromiseRejectBlock)rejecter)
 
 RCT_EXTERN_METHOD(isEnabled:
+  (RCTPromiseResolveBlock)resolver
+  rejecter: (RCTPromiseRejectBlock)rejecter)
+
+RCT_EXTERN_METHOD(startScan:
+  (NSDictionary *)options
+  resolver: (RCTPromiseResolveBlock)resolver
+  rejecter: (RCTPromiseRejectBlock)rejecter)
+
+RCT_EXTERN_METHOD(stopScan:
   (RCTPromiseResolveBlock)resolver
   rejecter: (RCTPromiseRejectBlock)rejecter)
 
@@ -52,23 +53,5 @@ RCT_EXTERN_METHOD(closeGatt:
   (NSString *)address
   resolver: (RCTPromiseResolveBlock)resolver
   rejecter: (RCTPromiseRejectBlock)rejecter)
-
-- (NSDictionary *)constantsToExport {
-  return @{
-    @"events": @{
-      @"connectionState": @{
-        CONNECTED: CONNECTED,
-        CONNECTING: CONNECTING,
-        DISCONNECTED: DISCONNECTED,
-        DISCONNECTING: DISCONNECTING
-      },
-      @"gatt": @{
-        SERVICES_DISCOVERED: SERVICES_DISCOVERED,
-        CHARACTERISTIC_READ: CHARACTERISTIC_READ,
-        CHARACTERISTIC_WRITTEN: CHARACTERISTIC_WRITTEN
-      }
-    }
-  };
-}
 
 @end
