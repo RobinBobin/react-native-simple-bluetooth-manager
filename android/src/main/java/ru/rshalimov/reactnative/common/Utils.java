@@ -118,11 +118,17 @@ public class Utils {
       return ar;
    }
    
-   public static WritableArray writableArrayFrom(byte [] array) {
+   public static WritableArray writableArrayFrom(byte [] array, boolean signed) {
       final WritableArray wa = Arguments.createArray();
       
-      for (byte value : array) {
-         wa.pushInt(value);
+      if (signed) {
+         for (byte value : array) {
+            wa.pushInt(value);
+         }
+      } else {
+         for (byte value : array) {
+            wa.pushInt(value < 0 ? value + 256 : value);
+         }
       }
       
       return wa;

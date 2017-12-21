@@ -149,6 +149,8 @@ class Module extends ReactContextBaseJavaModule {
    private final BTGattCallback btGattCallback = new BTGattCallback();
    private final ScanCallback scanCallback = new ScanCallback();
    
+   private boolean advertisementDataUnsigned;
+   
    Module(ReactApplicationContext reactContext) {
       super(reactContext);
    }
@@ -231,12 +233,15 @@ class Module extends ReactContextBaseJavaModule {
          final ScanSettings scanSettings = getScanSettings(Utils.
             safeGet(options, "settings", Arguments.createMap()));
          
+         advertisementDataUnsigned = Utils.safeGet(
+            options, "advertisementDataUnsigned", true);
+         
          Log.d(TAG, String.format("startScan(%s)", options));
          
          scanner.startScan(scanFilters, scanSettings, scanCallback);
          
          promise.resolve(null);
-      } catch (IllegalStateException | IllegalArgumentException e) {
+      } catch (IllegalStateException e) {
          promise.reject("", e.getMessage());
       }
    }
@@ -443,7 +448,9 @@ class Module extends ReactContextBaseJavaModule {
          final WritableMap scanRecord = Arguments.createMap();
          final ScanRecord scRecord = scanResult.getScanRecord();
          
-         scanRecord.putArray("bytes", Utils.writableArrayFrom(scRecord.getBytes()));
+         scanRecord.putArray("bytes", Utils.writableArrayFrom(
+            scRecord.getBytes(), !advertisementDataUnsigned));
+         
          scanRecord.putString("name", scRecord.getDeviceName());
          
          // = result = //
@@ -514,13 +521,14 @@ class Module extends ReactContextBaseJavaModule {
    }
    
    private List <ScanFilter> getScanFilters(ReadableArray filters) {
-      final List <ScanFilter> scanFilters = new ArrayList <> ();      
+      final List <ScanFilter> scanFilters = new ArrayList <> ();
+      
       for (int index = 0; index < filters.size(); index++) {
          final ScanFilter.Builder builder = new ScanFilter.Builder();
          final ReadableMap filter = filters.getMap(index);
          
-         if (filter.hasKey("deviceAddress")) {
-            builder.setDeviceAddress(filter.getString("deviceAddress"));
+         if (filter.hasKey("deviceId")) {
+            builder.setDeviceAddress(filter.getString("deviceId"));
          }
          
          if (filter.hasKey("deviceName")) {
