@@ -23,12 +23,16 @@ struct ScanFilter {
   var deviceName: String?;
 }
 
+enum Errors : Error {
+  case unknownDevice(id: String)
+}
+
 @objc(SimpleBluetoothManager) class SimpleBluetoothManager:
   RCTEventEmitter,
   CBCentralManagerDelegate
 {
   var manager: CBCentralManager?;
-  var peripherals: Set <CBPeripheral> = [];
+  var peripherals = [String: CBPeripheral]();
   var scanFilters: [ScanFilter] = [];
   var advertisementDataUnsigned = true;
   
@@ -79,7 +83,7 @@ struct ScanFilter {
     }
     
     if emit ?? true {
-      peripherals.insert(didDiscover);
+      peripherals[didDiscover.identifier.uuidString] = didDiscover;
       
       var bytes: [Int8]? = advertisementDataUnsigned ? nil : [];
       var ubytes: [UInt8]? = advertisementDataUnsigned ? [] : nil;
@@ -113,12 +117,34 @@ struct ScanFilter {
     }
   }
   
+  func centralManager(_ central: CBCentralManager, didConnect: CBPeripheral) {
+    
+  }
+  
+  func centralManager(_ central: CBCentralManager, didFailToConnect: CBPeripheral, error: Error?) {
+    
+  }
+  
+  func centralManager(_ central: CBCentralManager, didDisconnectPeripheral: CBPeripheral, error: Error?) {
+    
+  }
+  
   func emit(eventName: String, params: [String: Any]) {
     var body: [String: Any] = ["eventName": eventName];
     
     params.forEach { param in body[param.key] = param.value };
     
     sendEvent(withName: eventName, body: body);
+  }
+  
+  func getPeripheral(id: String) throws -> CBPeripheral {
+    let peripheral = peripherals[id];
+    
+    if (peripheral == nil) {
+      throw Errors.unknownDevice(id: id);
+    }
+    
+    return peripheral!;
   }
   
   @objc override func constantsToExport() -> [String: Any] {
@@ -188,7 +214,7 @@ struct ScanFilter {
         nativeOptions[CBCentralManagerScanOptionAllowDuplicatesKey] = allowDuplicates;
       }
       
-      manager?.scanForPeripherals(withServices: nil, options: nativeOptions);
+      manager!.scanForPeripherals(withServices: nil, options: nativeOptions);
       
       resolver(nil);
     }
@@ -206,7 +232,19 @@ struct ScanFilter {
     resolver: RCTPromiseResolveBlock,
     rejecter: RCTPromiseRejectBlock) -> Void
   {
-    rejecter("", "can't connect yet", nil);
+    do {
+      let peripheral = try getPeripheral(id: address);
+      
+      if peripheral.state.rawValue == CBPeripheralState.disconnected.rawValue
+        || peripheral.state.rawValue == CBPeripheralState.disconnecting.rawValue
+      {
+        manager!.connect(peripheral);
+        
+        resolver(nil);
+      }
+    } catch {
+      rejecter("", String(describing: error), nil);
+    }
   }
   
   @objc func discoverServices(
@@ -245,6 +283,12 @@ struct ScanFilter {
     resolver: RCTPromiseResolveBlock,
     rejecter: RCTPromiseRejectBlock)
   {
-    rejecter("", "can't close yet", nil);
+    do {
+      manager!.cancelPeripheralConnection(try getPeripheral(id: address));
+      
+      resolver(nil);
+    } catch {
+      rejecter("", String(describing: error), nil);
+    }
   }
 }
