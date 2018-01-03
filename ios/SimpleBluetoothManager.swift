@@ -23,16 +23,71 @@ struct ScanFilter {
   var deviceName: String?;
 }
 
+class CBPeripheralData {
+  let peripheral: CBPeripheral;
+  private var autoConnect: Bool?;
+  private var serviceIndex = -1;
+  private var characteristicIndex = -1;
+  
+  init(peripheral: CBPeripheral) {
+    self.peripheral = peripheral;
+  }
+  
+  func setAutoConnect(autoConnect: Bool) {
+    self.autoConnect = autoConnect;
+  }
+  
+  func isAutoConnect() -> Bool {
+    return autoConnect!;
+  }
+  
+  func discoverCharacteristics() -> Bool {
+    serviceIndex += 1;
+    
+    let hasNext = serviceIndex < peripheral.services!.count;
+    
+    if hasNext {
+      peripheral.discoverCharacteristics(nil, for: peripheral.services![serviceIndex]);
+      
+      characteristicIndex = -1;
+    }
+    
+    return hasNext;
+  }
+  
+  func discoverDescriptors() -> Bool {
+    characteristicIndex += 1;
+    
+    let hasNext = characteristicIndex < peripheral.services![serviceIndex].characteristics!.count;
+    
+    if hasNext {
+      peripheral.discoverDescriptors(for: peripheral.services![serviceIndex].characteristics![characteristicIndex]);
+    }
+    
+    return hasNext;
+  }
+  
+  func resetDiscovered() {
+    serviceIndex = -1;
+    characteristicIndex = -1;
+  }
+  
+  func isDiscovered() -> Bool {
+    return peripheral.services?.count == serviceIndex && peripheral.services![serviceIndex - 1].characteristics?.count == characteristicIndex && peripheral.services![serviceIndex - 1].characteristics![characteristicIndex - 1].descriptors != nil;
+  }
+}
+
 enum Errors : Error {
   case unknownDevice(id: String)
 }
 
 @objc(SimpleBluetoothManager) class SimpleBluetoothManager:
   RCTEventEmitter,
-  CBCentralManagerDelegate
+  CBCentralManagerDelegate,
+  CBPeripheralDelegate
 {
   var manager: CBCentralManager?;
-  var peripherals = [String: CBPeripheral]();
+  var peripherals = [String: CBPeripheralData]();
   var scanFilters: [ScanFilter] = [];
   var advertisementDataUnsigned = true;
   
@@ -70,11 +125,13 @@ enum Errors : Error {
     advertisementData: [String: Any],
     rssi: NSNumber)
   {
+    let localName = advertisementData[CBAdvertisementDataLocalNameKey] as? String;
+    
     var emit: Bool?;
     
     for scanFilter in scanFilters {
       if scanFilter.deviceName != nil {
-        emit = didDiscover.name == scanFilter.deviceName;
+        emit = didDiscover.name == scanFilter.deviceName || localName == scanFilter.deviceName;
       }
       
       if emit ?? false {
@@ -83,15 +140,15 @@ enum Errors : Error {
     }
     
     if emit ?? true {
-      peripherals[didDiscover.identifier.uuidString] = didDiscover;
+      peripherals[didDiscover.identifier.uuidString] = CBPeripheralData(peripheral: didDiscover);
       
       var bytes: [Int8]? = advertisementDataUnsigned ? nil : [];
       var ubytes: [UInt8]? = advertisementDataUnsigned ? [] : nil;
       
       let data: Data? = advertisementData[CBAdvertisementDataManufacturerDataKey] as? Data;
       
-      if (data != nil) {
-        if (bytes == nil) {
+      if data != nil {
+        if bytes == nil {
           for uint8 in data! {
             ubytes!.append(uint8);
           }
@@ -111,22 +168,77 @@ enum Errors : Error {
           "rssi": rssi,
           "scanRecord": [
             "bytes": bytes ?? ubytes as Any,
-            "name": advertisementData[CBAdvertisementDataLocalNameKey]
+            "name": localName as Any
           ]
       ]]]);
     }
   }
   
   func centralManager(_ central: CBCentralManager, didConnect: CBPeripheral) {
+    didConnect.delegate = self;
     
+    emitConnectedDisconnected(
+      connected: true,
+      peripheral: didConnect,
+      error: nil);
   }
   
   func centralManager(_ central: CBCentralManager, didFailToConnect: CBPeripheral, error: Error?) {
-    
+    emitConnectedDisconnected(
+      connected: true,
+      peripheral: didFailToConnect,
+      error: error);
   }
   
   func centralManager(_ central: CBCentralManager, didDisconnectPeripheral: CBPeripheral, error: Error?) {
+    emitConnectedDisconnected(
+      connected: false,
+      peripheral: didDisconnectPeripheral,
+      error: error);
     
+    let nsError = error as NSError?;
+    
+    if nsError?.domain == CBErrorDomain && nsError?.code == CBError.Code.connectionTimeout.rawValue {
+      do {
+        let peripheralData = try getPeripheralData(id: didDisconnectPeripheral.identifier.uuidString);
+        
+        if peripheralData.isAutoConnect() {
+          manager!.connect(peripheralData.peripheral);
+        }
+      } catch {
+        NSLog("%@", String(describing: error));
+      }
+    }
+  }
+  
+  func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
+    if error != nil {
+      emitServices(peripheral: peripheral, error: error);
+    } else {
+      _ = try! getPeripheralData(id: peripheral.identifier.uuidString).discoverCharacteristics();
+    }
+  }
+  
+  func peripheral(_ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService, error: Error?) {
+    if error != nil {
+      emitServices(peripheral: peripheral, error: error);
+    } else {
+      _ = try! getPeripheralData(id: peripheral.identifier.uuidString).discoverDescriptors();
+    }
+  }
+  
+  func peripheral(_ peripheral: CBPeripheral, didDiscoverDescriptorsFor characteristic: CBCharacteristic, error: Error?) {
+    var emit = error != nil;
+    
+    if !emit {
+      let peripheralData = try! getPeripheralData(id: peripheral.identifier.uuidString);
+      
+      emit = !(peripheralData.discoverDescriptors() || peripheralData.discoverCharacteristics());
+    }
+    
+    if emit {
+      emitServices(peripheral: peripheral, error: error);
+    }
   }
   
   func emit(eventName: String, params: [String: Any]) {
@@ -137,14 +249,61 @@ enum Errors : Error {
     sendEvent(withName: eventName, body: body);
   }
   
-  func getPeripheral(id: String) throws -> CBPeripheral {
-    let peripheral = peripherals[id];
+  func putCommonGattParams(peripheral: CBPeripheral, error: Error?) -> [String: Any] {
+    return [
+      "id": peripheral.identifier.uuidString,
+      "status": (error as NSError?)?.localizedDescription ?? "",
+      "error": error != nil
+    ];
+  }
+  
+  func emitConnectedDisconnected(connected: Bool, peripheral: CBPeripheral, error: Error?) {
+    emit(
+      eventName: connected ? CONNECTED : DISCONNECTED,
+      params: putCommonGattParams(
+        peripheral: peripheral,
+        error: error));
+  }
+  
+  func emitServices(peripheral: CBPeripheral, error: Error?) {
+    var services = [[String: Any]]();
     
-    if (peripheral == nil) {
+    if error == nil {
+      for service in peripheral.services! {
+        var chars = [[String: Any]]();
+        
+        for ch in service.characteristics! {
+          chars.append([
+            "uuid": ch.uuid.uuidString,
+            "instanceId": ch.uuid.uuidString,
+            //c.putInt("permissions", ch.getPermissions());
+            //c.putInt("properties", ch.getProperties());
+            //c.putInt("writeType", ch.getWriteType());]);
+          ]);
+        }
+        
+        services.append([
+          "uuid": service.uuid.uuidString,
+          "instanceId": service.uuid.uuidString,
+          "characteristics": chars]);
+      }
+    }
+    
+    var params = putCommonGattParams(peripheral: peripheral, error: error);
+    
+    params["services"] = services;
+    
+    emit(eventName: SERVICES_DISCOVERED, params: params);
+  }
+  
+  func getPeripheralData(id: String) throws -> CBPeripheralData {
+    let peripheralData = peripherals[id];
+    
+    if peripheralData == nil {
       throw Errors.unknownDevice(id: id);
     }
     
-    return peripheral!;
+    return peripheralData!;
   }
   
   @objc override func constantsToExport() -> [String: Any] {
@@ -233,17 +392,19 @@ enum Errors : Error {
     rejecter: RCTPromiseRejectBlock) -> Void
   {
     do {
-      let peripheral = try getPeripheral(id: address);
+      let peripheralData = try getPeripheralData(id: address);
       
-      if peripheral.state.rawValue == CBPeripheralState.disconnected.rawValue
-        || peripheral.state.rawValue == CBPeripheralState.disconnecting.rawValue
+      if peripheralData.peripheral.state == CBPeripheralState.disconnected
+        || peripheralData.peripheral.state == CBPeripheralState.disconnecting
       {
-        manager!.connect(peripheral);
+        peripheralData.setAutoConnect(autoConnect: autoConnect);
+        
+        manager!.connect(peripheralData.peripheral);
         
         resolver(nil);
       }
     } catch {
-      rejecter("", String(describing: error), nil);
+      rejecter("", String(describing: error), error);
     }
   }
   
@@ -253,7 +414,20 @@ enum Errors : Error {
     resolver: RCTPromiseResolveBlock,
     rejecter: RCTPromiseRejectBlock) -> Void
   {
-    rejecter("", "can't discover yet", nil);
+    do {
+      let peripheralData = try getPeripheralData(id: address);
+      
+      if useCache && peripheralData.isDiscovered() {
+        emitServices(peripheral: peripheralData.peripheral, error: nil);
+      } else {
+        peripheralData.resetDiscovered();
+        peripheralData.peripheral.discoverServices(nil);
+        
+        resolver(nil);
+      }
+    } catch {
+      rejecter("", String(describing: error), error);
+    }
   }
   
   @objc func readCharacteristic(
@@ -284,11 +458,11 @@ enum Errors : Error {
     rejecter: RCTPromiseRejectBlock)
   {
     do {
-      manager!.cancelPeripheralConnection(try getPeripheral(id: address));
+      manager!.cancelPeripheralConnection(try getPeripheralData(id: address).peripheral);
       
       resolver(nil);
     } catch {
-      rejecter("", String(describing: error), nil);
+      rejecter("", String(describing: error), error);
     }
   }
 }
