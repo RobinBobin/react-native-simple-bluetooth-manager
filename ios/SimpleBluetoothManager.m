@@ -4,7 +4,7 @@
 @interface RCT_EXTERN_MODULE(SimpleBluetoothManager, RCTEventEmitter)
 
 RCT_EXTERN_METHOD(isValid:
-  (NSString *)address
+  (NSString *)uuid
   resolver: (RCTPromiseResolveBlock)resolver
   rejecter: (RCTPromiseRejectBlock)rejecter)
 
@@ -22,19 +22,19 @@ RCT_EXTERN_METHOD(stopScan:
   rejecter: (RCTPromiseRejectBlock)rejecter)
 
 RCT_EXTERN_METHOD(connectGatt:
-  (NSString *)address
+  (NSString *)uuid
   autoConnect: (BOOL)autoConnect
   resolver: (RCTPromiseResolveBlock)resolver
   rejecter: (RCTPromiseRejectBlock)rejecter)
 
 RCT_EXTERN_METHOD(discoverServices:
-  (NSString *)address
+  (NSString *)uuid
   useCache: (BOOL)useCache
   resolver: (RCTPromiseResolveBlock)resolver
   rejecter: (RCTPromiseRejectBlock)rejecter)
 
 RCT_EXTERN_METHOD(readCharacteristic:
-  (NSString *)address
+  (NSString *)peripheralUuid
   serviceUuid: (NSString *)serviceUuid
   characteristicUuid: (NSString *)characteristicUuid
   options: (NSDictionary *)options
@@ -42,15 +42,15 @@ RCT_EXTERN_METHOD(readCharacteristic:
   rejecter: (RCTPromiseRejectBlock)rejecter)
 
 RCT_EXTERN_METHOD(writeCharacteristic:
-  (NSString *)address
+  (NSString *)peripheralUuid
   serviceUuid: (NSString *)serviceUuid
   characteristicUuid: (NSString *)characteristicUuid
-  options: (NSDictionary *)dataAndOptions
+  dataAndOptions: (NSDictionary *)dataAndOptions
   resolver: (RCTPromiseResolveBlock)resolver
   rejecter: (RCTPromiseRejectBlock)rejecter)
 
 RCT_EXTERN_METHOD(closeGatt:
-  (NSString *)address
+  (NSString *)uuid
   resolver: (RCTPromiseResolveBlock)resolver
   rejecter: (RCTPromiseRejectBlock)rejecter)
 

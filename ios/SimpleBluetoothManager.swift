@@ -29,11 +29,11 @@ class CBPeripheralData {
   private var serviceIndex = -1;
   private var characteristicIndex = -1;
   
-  init(peripheral: CBPeripheral) {
+  init(_ peripheral: CBPeripheral) {
     self.peripheral = peripheral;
   }
   
-  func setAutoConnect(autoConnect: Bool) {
+  func setAutoConnect(_ autoConnect: Bool) {
     self.autoConnect = autoConnect;
   }
   
@@ -78,7 +78,10 @@ class CBPeripheralData {
 }
 
 enum Errors : Error {
-  case unknownDevice(id: String)
+  case unknownDevice(uuid: String)
+  case servicesNotDiscovered(uuid: String)
+  case invalidServiceUuid(peripheralUuid: String, serviceUuid: String)
+  case invalidCharacteristicUuid(peripheralUuid: String, serviceUuid: String, characteristicUuid: String)
 }
 
 @objc(SimpleBluetoothManager) class SimpleBluetoothManager:
@@ -140,7 +143,7 @@ enum Errors : Error {
     }
     
     if emit ?? true {
-      peripherals[didDiscover.identifier.uuidString] = CBPeripheralData(peripheral: didDiscover);
+      peripherals[didDiscover.identifier.uuidString] = CBPeripheralData(didDiscover);
       
       var bytes: [Int8]? = advertisementDataUnsigned ? nil : [];
       var ubytes: [UInt8]? = advertisementDataUnsigned ? [] : nil;
@@ -159,7 +162,7 @@ enum Errors : Error {
         }
       }
       
-      self.emit(eventName: SCAN_RESULT, params: [
+      self.emit(SCAN_RESULT, [
         "results": [[
           "device": [
             "id": didDiscover.identifier.uuidString,
@@ -200,7 +203,7 @@ enum Errors : Error {
     
     if nsError?.domain == CBErrorDomain && nsError?.code == CBError.Code.connectionTimeout.rawValue {
       do {
-        let peripheralData = try getPeripheralData(id: didDisconnectPeripheral.identifier.uuidString);
+        let peripheralData = try getPeripheralData(didDisconnectPeripheral.identifier.uuidString);
         
         if peripheralData.isAutoConnect() {
           manager!.connect(peripheralData.peripheral);
@@ -211,11 +214,20 @@ enum Errors : Error {
     }
   }
   
+  func peripheral(_ peripheral: CBPeripheral, didWriteValueFor characteristic: CBCharacteristic, error: Error?) {
+    var params = putCommonGattParams(peripheral, error);
+    
+    params["serviceUuid"] = characteristic.service.uuid.uuidString;
+    params["characteristicUuid"] = characteristic.uuid.uuidString;
+    
+    emit(CHARACTERISTIC_WRITTEN, params);
+  }
+  
   func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
     if error != nil {
       emitServices(peripheral: peripheral, error: error);
     } else {
-      _ = try! getPeripheralData(id: peripheral.identifier.uuidString).discoverCharacteristics();
+      _ = try! getPeripheralData(peripheral.identifier.uuidString).discoverCharacteristics();
     }
   }
   
@@ -223,7 +235,7 @@ enum Errors : Error {
     if error != nil {
       emitServices(peripheral: peripheral, error: error);
     } else {
-      _ = try! getPeripheralData(id: peripheral.identifier.uuidString).discoverDescriptors();
+      _ = try! getPeripheralData(peripheral.identifier.uuidString).discoverDescriptors();
     }
   }
   
@@ -231,7 +243,7 @@ enum Errors : Error {
     var emit = error != nil;
     
     if !emit {
-      let peripheralData = try! getPeripheralData(id: peripheral.identifier.uuidString);
+      let peripheralData = try! getPeripheralData(peripheral.identifier.uuidString);
       
       emit = !(peripheralData.discoverDescriptors() || peripheralData.discoverCharacteristics());
     }
@@ -241,7 +253,7 @@ enum Errors : Error {
     }
   }
   
-  func emit(eventName: String, params: [String: Any]) {
+  func emit(_ eventName: String, _ params: [String: Any]) {
     var body: [String: Any] = ["eventName": eventName];
     
     params.forEach { param in body[param.key] = param.value };
@@ -249,7 +261,7 @@ enum Errors : Error {
     sendEvent(withName: eventName, body: body);
   }
   
-  func putCommonGattParams(peripheral: CBPeripheral, error: Error?) -> [String: Any] {
+  func putCommonGattParams(_ peripheral: CBPeripheral, _ error: Error?) -> [String: Any] {
     return [
       "id": peripheral.identifier.uuidString,
       "status": (error as NSError?)?.localizedDescription ?? "",
@@ -258,11 +270,7 @@ enum Errors : Error {
   }
   
   func emitConnectedDisconnected(connected: Bool, peripheral: CBPeripheral, error: Error?) {
-    emit(
-      eventName: connected ? CONNECTED : DISCONNECTED,
-      params: putCommonGattParams(
-        peripheral: peripheral,
-        error: error));
+    emit(connected ? CONNECTED : DISCONNECTED, putCommonGattParams(peripheral, error));
   }
   
   func emitServices(peripheral: CBPeripheral, error: Error?) {
@@ -289,21 +297,48 @@ enum Errors : Error {
       }
     }
     
-    var params = putCommonGattParams(peripheral: peripheral, error: error);
+    var params = putCommonGattParams(peripheral, error);
     
     params["services"] = services;
     
-    emit(eventName: SERVICES_DISCOVERED, params: params);
+    emit(SERVICES_DISCOVERED, params);
   }
   
-  func getPeripheralData(id: String) throws -> CBPeripheralData {
-    let peripheralData = peripherals[id];
+  func getPeripheralData(_ uuid: String) throws -> CBPeripheralData {
+    let peripheralData = peripherals[uuid];
     
     if peripheralData == nil {
-      throw Errors.unknownDevice(id: id);
+      throw Errors.unknownDevice(uuid: uuid);
     }
     
     return peripheralData!;
+  }
+  
+  func getCharacteristic(_ peripheral: CBPeripheral, _ serviceUuid: String, _ characteristicUuid: String) throws -> CBCharacteristic {
+    func find <T: CBAttribute> (_ array: [T], _ uuid: String, _ error: Error) throws -> T {
+      var element: T?;
+      
+      for e in array {
+        if e.uuid.uuidString == uuid {
+          element = e;
+          break;
+        }
+      }
+      
+      if element == nil {
+        throw error;
+      }
+      
+      return element!;
+    }
+    
+    return try find(
+      try find(
+        peripheral.services!,
+        serviceUuid,
+        Errors.invalidServiceUuid(peripheralUuid: peripheral.identifier.uuidString, serviceUuid: serviceUuid)).characteristics!,
+      characteristicUuid,
+      Errors.invalidCharacteristicUuid(peripheralUuid: peripheral.identifier.uuidString, serviceUuid: serviceUuid, characteristicUuid: characteristicUuid));
   }
   
   @objc override func constantsToExport() -> [String: Any] {
@@ -338,18 +373,18 @@ enum Errors : Error {
     ]];
   }
   
-  @objc func isValid(_ address: String, resolver: RCTPromiseResolveBlock, rejecter: RCTPromiseRejectBlock) -> Void {
+  @objc func isValid(_ uuid: String, resolver: RCTPromiseResolveBlock, rejecter: RCTPromiseRejectBlock) {
     resolver(nil);
   }
 
-  @objc func isEnabled(_ resolver: RCTPromiseResolveBlock, rejecter: RCTPromiseRejectBlock) -> Void {
+  @objc func isEnabled(_ resolver: RCTPromiseResolveBlock, rejecter: RCTPromiseRejectBlock) {
     resolver(manager!.state == CBManagerState.poweredOn);
   }
   
   @objc func startScan(
     _ options: [String: Any],
     resolver: RCTPromiseResolveBlock,
-    rejecter: RCTPromiseRejectBlock) -> Void
+    rejecter: RCTPromiseRejectBlock)
   {
     if manager!.state != CBManagerState.poweredOn {
       rejecter("", "Bluetooth is not on", nil);
@@ -379,25 +414,25 @@ enum Errors : Error {
     }
   }
   
-  @objc func stopScan(_ resolver: RCTPromiseResolveBlock, rejecter: RCTPromiseRejectBlock) -> Void {
+  @objc func stopScan(_ resolver: RCTPromiseResolveBlock, rejecter: RCTPromiseRejectBlock) {
     manager!.stopScan();
     
     resolver(nil);
   }
   
   @objc func connectGatt(
-    _ address: String,
+    _ uuid: String,
     autoConnect: Bool,
     resolver: RCTPromiseResolveBlock,
-    rejecter: RCTPromiseRejectBlock) -> Void
+    rejecter: RCTPromiseRejectBlock)
   {
     do {
-      let peripheralData = try getPeripheralData(id: address);
+      let peripheralData = try getPeripheralData(uuid);
       
       if peripheralData.peripheral.state == CBPeripheralState.disconnected
         || peripheralData.peripheral.state == CBPeripheralState.disconnecting
       {
-        peripheralData.setAutoConnect(autoConnect: autoConnect);
+        peripheralData.setAutoConnect(autoConnect);
         
         manager!.connect(peripheralData.peripheral);
         
@@ -409,13 +444,13 @@ enum Errors : Error {
   }
   
   @objc func discoverServices(
-    _ address: String,
+    _ uuid: String,
     useCache: Bool,
     resolver: RCTPromiseResolveBlock,
-    rejecter: RCTPromiseRejectBlock) -> Void
+    rejecter: RCTPromiseRejectBlock)
   {
     do {
-      let peripheralData = try getPeripheralData(id: address);
+      let peripheralData = try getPeripheralData(uuid);
       
       if useCache && peripheralData.isDiscovered() {
         emitServices(peripheral: peripheralData.peripheral, error: nil);
@@ -431,7 +466,7 @@ enum Errors : Error {
   }
   
   @objc func readCharacteristic(
-    _ address: String,
+    _ peripheralUuid: String,
     serviceUuid: String,
     characteristicUuid: String,
     options: [String: Any],
@@ -442,23 +477,39 @@ enum Errors : Error {
   }
   
   @objc func writeCharacteristic(
-    _ address: String,
+    _ peripheralUuid: String,
     serviceUuid: String,
     characteristicUuid: String,
     dataAndOptions: [String: Any],
     resolver: RCTPromiseResolveBlock,
     rejecter: RCTPromiseRejectBlock)
   {
-    rejecter("", "can't write yet", nil);
+    do {
+      let peripheral = try getPeripheralData(peripheralUuid).peripheral;
+      let value = dataAndOptions["value"] as! Array <Int>;
+      
+      var data = [UInt8]();
+      data.reserveCapacity(value.count);
+      
+      for byte in value {
+        data.append(UInt8(byte >= 0 ? byte : byte + 256));
+      }
+      
+      peripheral.writeValue(Data(data), for: try getCharacteristic(peripheral, serviceUuid, characteristicUuid), type: CBCharacteristicWriteType.withoutResponse)
+      
+      resolver(nil);
+    } catch {
+      rejecter("", String(describing: error), error);
+    }
   }
   
   @objc func closeGatt(
-    _ address: String,
+    _ uuid: String,
     resolver: RCTPromiseResolveBlock,
     rejecter: RCTPromiseRejectBlock)
   {
     do {
-      manager!.cancelPeripheralConnection(try getPeripheralData(id: address).peripheral);
+      manager!.cancelPeripheralConnection(try getPeripheralData(uuid).peripheral);
       
       resolver(nil);
     } catch {
