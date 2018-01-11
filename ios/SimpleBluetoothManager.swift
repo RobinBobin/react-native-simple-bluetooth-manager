@@ -319,7 +319,7 @@ enum Errors : Error {
       var element: T?;
       
       for e in array {
-        if e.uuid.uuidString == uuid {
+        if e.uuid.uuidString.caseInsensitiveCompare(uuid) == ComparisonResult.orderedSame {
           element = e;
           break;
         }
@@ -495,7 +495,7 @@ enum Errors : Error {
         data.append(UInt8(byte >= 0 ? byte : byte + 256));
       }
       
-      peripheral.writeValue(Data(data), for: try getCharacteristic(peripheral, serviceUuid, characteristicUuid), type: CBCharacteristicWriteType.withoutResponse)
+      peripheral.writeValue(Data(data), for: try getCharacteristic(peripheral, serviceUuid, characteristicUuid), type: CBCharacteristicWriteType.withResponse)
       
       resolver(nil);
     } catch {
