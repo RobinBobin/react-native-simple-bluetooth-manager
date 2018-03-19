@@ -70,10 +70,6 @@ export default class BluetoothDevice {
       return !!this.connected;
    }
    
-   setConnected(connected) {
-      this.connected = connected;
-   }
-   
    flushRequests(read) {
       if (read == true || read == undefined) {
          this.requests.read.length = 0;
@@ -154,6 +150,14 @@ export default class BluetoothDevice {
    }
    
    _innerListener(listener, data) {
-      data.id.valueOf() == this.builder.id && listener.listener(data);
+      if (data.id.valueOf() == this.getId()) {
+         if (listener.eventType == bt.events.connectionState.CONNECTED) {
+            this.connected = true;
+         } else if (listener.eventType == bt.events.connectionState.DISCONNECTED) {
+            this.connected = false;
+         }
+         
+         listener.listener(data);
+      }
    }
 }
