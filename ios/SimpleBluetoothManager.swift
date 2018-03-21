@@ -341,7 +341,7 @@ enum Errors : Error {
          Errors.invalidCharacteristicUuid(peripheralUuid: peripheral.identifier.uuidString, serviceUuid: serviceUuid, characteristicUuid: characteristicUuid));
    }
    
-   @objc override func constantsToExport() -> [String: Any] {
+   @objc override func constantsToExport() -> [AnyHashable: Any] {
       var events: [String: [String: String]] = [:];
       
       [
