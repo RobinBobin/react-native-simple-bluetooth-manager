@@ -92,16 +92,16 @@ export default class BluetoothDevice {
       return bt.isValid(this.getId());
    }
    
-   connectGatt(autoConnect = true) {
-      return bt.connectGatt(this.getId(), autoConnect);
+   async connectGatt(autoConnect = true) {
+      await bt.connectGatt(this.getId(), autoConnect);
    }
    
-   discoverServices(useCache = true) {
-      return bt.discoverServices(this.getId(), useCache);
+   async discoverServices(useCache = true) {
+      await bt.discoverServices(this.getId(), useCache);
    }
    
-   readCharacteristic(serviceUuid, characteristicUuid, options) {
-      return this._safeReadWrite(true, arguments);
+   async readCharacteristic(serviceUuid, characteristicUuid, options) {
+      await this._safeReadWrite(true, arguments);
    }
    
    async writeCharacteristic(serviceUuid, characteristicUuid, dataAndOptions) {
@@ -110,7 +110,7 @@ export default class BluetoothDevice {
          || !Array.isArray(dataAndOptions.value)
          || dataAndOptions.value.length <= dataAndOptions.chunkSize)
       {
-         return await this._safeReadWrite(false, arguments);
+         await this._safeReadWrite(false, arguments);
       }
       
       if (dataAndOptions.chunkSize <= 0) {
@@ -128,26 +128,58 @@ export default class BluetoothDevice {
       }
    }
    
-   closeGatt() {
-      return bt.closeGatt(this.getId());
+   async setCharacteristicNotification(serviceUuid, characteristicUuid, enable) {
+      await bt.setCharacteristicNotification(this.getId(),
+         serviceUuid, characteristicUuid, enable);
+      
+      await this._safeReadWrite(false, [
+         serviceUuid,
+         characteristicUuid,
+         "00002902-0000-1000-8000-00805f9b34fb",
+         {value: [+enable, 0]}
+      ]);
+   }
+   
+   async writeDescriptor(
+      serviceUuid,
+      characteristicUuid,
+      descriptorUuid,
+      dataAndOptions)
+   {
+      await this._safeReadWrite(false, arguments);
+   }
+   
+   async closeGatt() {
+      await bt.closeGatt(this.getId());
    }
    
    async _safeReadWrite(read, params) {
       const operation = read ? "read" : "write";
       const requests = this.requests[operation];
+      const descrOp = params.length == 4;
       
       const request = params.length ? {
          serviceUuid: params[0],
          characteristicUuid: params[1],
-         obj: params[2]
+         descriptorUuid: descrOp ? params[2] : undefined,
+         obj: params[descrOp ? 3 : 2]
       } : (requests.shift(), requests[0]);
       
       if (request != undefined && (!params.length || !requests.length)) {
-         await bt[operation + "Characteristic"](
+         const ar = [
             this.getId(),
             request.serviceUuid,
             request.characteristicUuid,
-            request.obj);
+         ];
+         
+         if (descrOp) {
+            ar.push(request.descriptorUuid);
+         }
+         
+         ar.push(request.obj);
+         
+         await bt[operation + (descrOp ? "Descriptor" :
+            "Characteristic")].apply(null, ar);
       }
       
       params.length && requests.push(request);

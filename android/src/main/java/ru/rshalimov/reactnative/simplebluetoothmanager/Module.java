@@ -18,6 +18,7 @@ import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothGatt;
 import android.bluetooth.BluetoothGattCallback;
 import android.bluetooth.BluetoothGattCharacteristic;
+import android.bluetooth.BluetoothGattDescriptor;
 import android.bluetooth.BluetoothGattService;
 import android.bluetooth.BluetoothProfile;
 import android.bluetooth.le.BluetoothLeScanner;
@@ -358,6 +359,76 @@ class Module extends ReactContextBaseJavaModule {
    }
    
    @ReactMethod
+   public void setCharacteristicNotification(
+      String address,
+      String serviceUuid,
+      String characteristicUuid,
+      Boolean enable,
+      Promise promise)
+   {
+      try {
+         final BluetoothGatt gatt = getGatt(address);
+         
+         final String logString = String.format("(%s, %s, %s, %s)",
+            address, serviceUuid, characteristicUuid, enable);
+         
+         if (!gatt.setCharacteristicNotification(getCharacteristic(
+            gatt, serviceUuid, characteristicUuid), enable))
+         {
+            throw new IllegalStateException(String.format(
+               "BluetoothGatt.setCharacteristicNotification() failed for %s",
+                  logString));
+         }
+         
+         Log.d(TAG, String.format("setCharacteristicNotification%s", logString));
+         
+         promise.resolve(null);
+      } catch (IllegalStateException | IllegalArgumentException e) {
+         promise.reject("", e.getMessage());
+      }
+   }
+   
+   @ReactMethod
+   public void writeDescriptor(
+      String address,
+      String serviceUuid,
+      String characteristicUuid,
+      String descriptorUuid,
+      ReadableMap dataAndOptions,
+      Promise promise)
+   {
+      try {
+         final BluetoothGatt gatt = getGatt(address);
+         
+         final BluetoothGattDescriptor descr = getDescriptor(
+            gatt, serviceUuid, characteristicUuid, descriptorUuid);
+         
+         final byte [] value = Utils.createByteArray(
+            dataAndOptions.getArray("value"));
+         
+         final String logString = String.format("(%s, %s, %s, %s, %s)",
+            address, serviceUuid, characteristicUuid, descriptorUuid,
+               Arrays.toString(value));
+         
+         if (!descr.setValue(value)) {
+            throw new IllegalStateException(String.format(
+               "Descriptor.setValue() failed for %s", logString));
+         }
+         
+         if (!gatt.writeDescriptor(descr)) {
+            throw new IllegalStateException(String.format(
+               "BluetoothGatt.writeDescriptor() failed for %s", logString));
+         }
+         
+         Log.d(TAG, String.format("writeDescriptor%s", logString));
+         
+         promise.resolve(null);
+      } catch (IllegalStateException | IllegalArgumentException e) {
+         promise.reject("", e.getMessage());
+      }
+   }
+   
+   @ReactMethod
    public void closeGatt(String address, Promise promise) {
       try {
          final BluetoothGatt gatt = getGatt(address);
@@ -508,6 +579,28 @@ class Module extends ReactContextBaseJavaModule {
       }
       
       return ch;
+   }
+   
+   private BluetoothGattDescriptor getDescriptor(
+      BluetoothGatt gatt,
+      String serviceUuid,
+      String characteristicUuid,
+      String descriptorUuid)
+   {
+      final BluetoothGattCharacteristic ch =
+         getCharacteristic(gatt, serviceUuid, characteristicUuid);
+      
+      final BluetoothGattDescriptor descr = ch.getDescriptor(
+         UUID.fromString(descriptorUuid));
+      
+      if (descr == null) {
+         throw new IllegalArgumentException(String.format(
+            "Characteristic '%s' of service '%s' of '%s' has no descriptor with " +
+               "uuid '%s'", characteristicUuid, serviceUuid, gatt.getDevice().
+                  getAddress(), descriptorUuid));
+      }
+      
+      return descr;
    }
    
    private BluetoothAdapter getAdapterEnsureEnabled() {
