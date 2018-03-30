@@ -16,6 +16,9 @@ let DISCONNECTING = "DISCONNECTING";
 let SERVICES_DISCOVERED = "SERVICES_DISCOVERED";
 let CHARACTERISTIC_READ = "CHARACTERISTIC_READ";
 let CHARACTERISTIC_WRITTEN = "CHARACTERISTIC_WRITTEN";
+let CHARACTERISTIC_CHANGED = "CHARACTERISTIC_CHANGED";
+let DESCRIPTOR_READ = "DESCRIPTOR_READ";
+let DESCRIPTOR_WRITTEN = "DESCRIPTOR_WRITTEN";
 let SCAN_FAILED = "SCAN_FAILED";
 let SCAN_RESULT = "SCAN_RESULT";
 
@@ -82,6 +85,7 @@ enum Errors : Error {
    case servicesNotDiscovered(uuid: String)
    case invalidServiceUuid(peripheralUuid: String, serviceUuid: String)
    case invalidCharacteristicUuid(peripheralUuid: String, serviceUuid: String, characteristicUuid: String)
+   case invalidDescriptorUuid(peripheralUuid: String, serviceUuid: String, characteristicUuid: String, descriptorUuid: String)
 }
 
 @objc(SimpleBluetoothManager) class SimpleBluetoothManager:
@@ -109,13 +113,16 @@ enum Errors : Error {
          SERVICES_DISCOVERED,
          CHARACTERISTIC_READ,
          CHARACTERISTIC_WRITTEN,
+         CHARACTERISTIC_CHANGED,
+         DESCRIPTOR_READ,
+         DESCRIPTOR_WRITTEN,
          SCAN_FAILED,
          SCAN_RESULT
       ];
    }
    
    func centralManagerDidUpdateState(_ central: CBCentralManager) {
-      NSLog("%@", "BT state updated to: \(central.state.rawValue)");
+      NSLog("%@", "BT state updated to: \(central.state.rawValue).");
       
       if central.state.rawValue < CBManagerState.poweredOff.rawValue {
          peripherals.removeAll();
@@ -253,6 +260,16 @@ enum Errors : Error {
       }
    }
    
+   func peripheral(_ peripheral: CBPeripheral, didUpdateNotificationStateFor characteristic: CBCharacteristic, error: Error?) {
+      if error != nil {
+         NSLog("%@", "Characteristic notification state failed to be updated (\(String(describing: error))).");
+      }
+   }
+   
+   func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
+      
+   }
+   
    func emit(_ eventName: String, _ params: [String: Any]) {
       var body: [String: Any] = ["eventName": eventName];
       
@@ -314,31 +331,47 @@ enum Errors : Error {
       return peripheralData!;
    }
    
-   func getCharacteristic(_ peripheral: CBPeripheral, _ serviceUuid: String, _ characteristicUuid: String) throws -> CBCharacteristic {
-      func find <T: CBAttribute> (_ array: [T], _ uuid: String, _ error: Error) throws -> T {
-         var element: T?;
-         
-         for e in array {
-            if e.uuid.uuidString.caseInsensitiveCompare(uuid) == ComparisonResult.orderedSame {
-               element = e;
-               break;
-            }
+   func findCBAttribute <T: CBAttribute> (_ array: [T], _ uuid: String, _ error: Error) throws -> T {
+      var element: T?;
+      
+      for e in array {
+         if e.uuid.uuidString.caseInsensitiveCompare(uuid) == ComparisonResult.orderedSame {
+            element = e;
+            break;
          }
-         
-         if element == nil {
-            throw error;
-         }
-         
-         return element!;
       }
       
-      return try find(
-         try find(
+      if element == nil {
+         throw error;
+      }
+      
+      return element!;
+   }
+   
+   func getCharacteristic(
+      _ peripheral: CBPeripheral,
+      _ serviceUuid: String,
+      _ characteristicUuid: String) throws -> CBCharacteristic
+   {
+      return try findCBAttribute(
+         try findCBAttribute(
             peripheral.services!,
             serviceUuid,
             Errors.invalidServiceUuid(peripheralUuid: peripheral.identifier.uuidString, serviceUuid: serviceUuid)).characteristics!,
          characteristicUuid,
          Errors.invalidCharacteristicUuid(peripheralUuid: peripheral.identifier.uuidString, serviceUuid: serviceUuid, characteristicUuid: characteristicUuid));
+   }
+   
+   func getDescriptor(
+      _ peripheral: CBPeripheral,
+      _ serviceUuid: String,
+      _ characteristicUuid: String,
+      _ descriptorUuid: String) throws -> CBDescriptor
+   {
+      return try findCBAttribute(
+         getCharacteristic(peripheral, serviceUuid, characteristicUuid).descriptors!,
+         descriptorUuid,
+         Errors.invalidDescriptorUuid(peripheralUuid: peripheral.identifier.uuidString, serviceUuid: serviceUuid, characteristicUuid: characteristicUuid, descriptorUuid: descriptorUuid));
    }
    
    @objc override func constantsToExport() -> [AnyHashable: Any] {
@@ -354,7 +387,10 @@ enum Errors : Error {
          "gatt": [
             SERVICES_DISCOVERED,
             CHARACTERISTIC_READ,
-            CHARACTERISTIC_WRITTEN
+            CHARACTERISTIC_WRITTEN,
+            CHARACTERISTIC_CHANGED,
+            DESCRIPTOR_READ,
+            DESCRIPTOR_WRITTEN
          ],
          "leScanCallback": [
             SCAN_FAILED,
@@ -501,6 +537,37 @@ enum Errors : Error {
       } catch {
          rejecter("", String(describing: error), error);
       }
+   }
+   
+   @objc func setCharacteristicNotification(
+      _ peripheralUuid: String,
+      serviceUuid: String,
+      characteristicUuid: String,
+      enable: Bool,
+      resolver: RCTPromiseResolveBlock,
+      rejecter: RCTPromiseRejectBlock)
+   {
+      do {
+         let peripheral = try getPeripheralData(peripheralUuid).peripheral;
+         
+         peripheral.setNotifyValue(enable, for: try getCharacteristic(peripheral, serviceUuid, characteristicUuid));
+         
+         resolver(nil);
+      } catch {
+         rejecter("", String(describing: error), error);
+      }
+   }
+   
+   @objc func writeDescriptor(
+      _ peripheralUuid: String,
+      serviceUuid: String,
+      characteristicUuid: String,
+      descriptorUuid: String,
+      dataAndOptions: [String: Any],
+      resolver: RCTPromiseResolveBlock,
+      rejecter: RCTPromiseRejectBlock)
+   {
+      rejecter("", "can't writeDescriptor yet", nil);
    }
    
    @objc func closeGatt(

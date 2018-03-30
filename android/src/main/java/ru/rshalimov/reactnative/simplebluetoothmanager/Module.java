@@ -58,7 +58,7 @@ class Module extends ReactContextBaseJavaModule {
             null;
          
          if (eventName != null) {
-            emit(eventName, putCommonParams(gatt, status));
+            emit(eventName, putCommonGattParams(gatt, status));
          }
       }
       
@@ -80,7 +80,7 @@ class Module extends ReactContextBaseJavaModule {
       {
          super.onCharacteristicRead(gatt, ch, status);
          
-         Log.d(TAG, String.format("onCharacteristicRead() not implemented yet"));
+         onReadWrittenChanged(gatt, ch, Boolean.TRUE, status);
       }
       
       @Override
@@ -91,17 +91,36 @@ class Module extends ReactContextBaseJavaModule {
       {
          super.onCharacteristicWrite(gatt, ch, status);
          
-         final String serviceUuid = ch.getService().getUuid().toString();
+         onReadWrittenChanged(gatt, ch, Boolean.FALSE, status);
+      }
+      
+      @Override
+      public void onCharacteristicChanged(BluetoothGatt gatt, BluetoothGattCharacteristic ch) {
+         super.onCharacteristicChanged(gatt, characteristic);
          
-         Log.d(TAG, String.format("onCharacteristicWrite(%s, %s, %s, %d)",
-            gatt.getDevice().getAddress(), serviceUuid, ch.getUuid(), status));
+         onReadWrittenChanged(gatt, ch, null, BluetoothGatt.GATT_SUCCESS);
+      }
+      
+      @Override
+      void onDescriptorRead(
+         BluetoothGatt gatt,
+         BluetoothGattDescriptor descriptor,
+         int status)
+      {
+         super.onDescriptorRead(gatt, descriptor, status);
          
-         final WritableMap params = putCommonParams(gatt, status);
+         onReadWrittenChanged(gatt, descriptor, Boolean.TRUE, status);
+      }
+      
+      @Override
+      void onDescriptorWrite(
+         BluetoothGatt gatt,
+         BluetoothGattDescriptor descriptor,
+         int status)
+      {
+         super.onDescriptorWrite(gatt, descriptor, status);
          
-         params.putString("serviceUuid", serviceUuid);
-         params.putString("characteristicUuid", ch.getUuid().toString());
-         
-         emit(CHARACTERISTIC_WRITTEN, params);
+         onReadWrittenChanged(gatt, descriptor, Boolean.FALSE, status);
       }
    }
    
@@ -143,6 +162,9 @@ class Module extends ReactContextBaseJavaModule {
       SERVICES_DISCOVERED = "SERVICES_DISCOVERED",
       CHARACTERISTIC_READ = "CHARACTERISTIC_READ",
       CHARACTERISTIC_WRITTEN = "CHARACTERISTIC_WRITTEN",
+      CHARACTERISTIC_CHANGED = "CHARACTERISTIC_CHANGED",
+      DESCRIPTOR_READ = "DESCRIPTOR_READ",
+      DESCRIPTOR_WRITTEN = "DESCRIPTOR_WRITTEN",
       SCAN_FAILED = "SCAN_FAILED",
       SCAN_RESULT = "SCAN_RESULT";
    
@@ -176,7 +198,10 @@ class Module extends ReactContextBaseJavaModule {
             "gatt",
             SERVICES_DISCOVERED,
             CHARACTERISTIC_READ,
-            CHARACTERISTIC_WRITTEN
+            CHARACTERISTIC_WRITTEN,
+            CHARACTERISTIC_CHANGED,
+            DESCRIPTOR_READ,
+            DESCRIPTOR_WRITTEN
          }, {
             "leScanCallback",
             SCAN_FAILED,
@@ -194,9 +219,9 @@ class Module extends ReactContextBaseJavaModule {
       
       final WritableMap scanModes = Arguments.createMap();
       
-      scanModes.putInt("LOW_POWER", 0);
-      scanModes.putInt("BALANCED", 1);
-      scanModes.putInt("LOW_LATENCY", 2);
+      scanModes.putInt("LOW_POWER", ScanSettings.SCAN_MODE_LOW_POWER);
+      scanModes.putInt("BALANCED", ScanSettings.SCAN_MODE_BALANCED);
+      scanModes.putInt("LOW_LATENCY", ScanSettings.SCAN_MODE_LOW_LATENCY);
       
       final Map <String, Object> constants = new HashMap <> ();
       constants.put("events", events);
@@ -460,7 +485,7 @@ class Module extends ReactContextBaseJavaModule {
       return gatt;
    }
    
-   private WritableMap putCommonParams(BluetoothGatt gatt, int status) {
+   private WritableMap putCommonGattParams(BluetoothGatt gatt, int status) {
       final WritableMap params = Arguments.createMap();
       
       params.putString("id", gatt.getDevice().getAddress());
@@ -497,7 +522,7 @@ class Module extends ReactContextBaseJavaModule {
          services.pushMap(srvc);
       }
       
-      final WritableMap params = putCommonParams(gatt, status);
+      final WritableMap params = putCommonGattParams(gatt, status);
       
       params.putArray("services", services);
       
@@ -601,6 +626,56 @@ class Module extends ReactContextBaseJavaModule {
       }
       
       return descr;
+   }
+   
+   private void onReadWrittenChanged(BluetoothGatt gatt, Object object, Boolean read, int status) {
+      final boolean isCh = object instanceof BluetoothGattCharacteristic;
+      final boolean changed = read == null;
+      
+      final BluetoothGattDescriptor descr = isCh ? null : (BluetoothGattDescriptor)object;
+      
+      final BluetoothGattCharacteristic ch = isCh ?
+         (BluetoothGattCharacteristic)object : descr.getCharacteristic();
+      
+      final String serviceUuid = ch.getService().getUuid().toString();
+      
+      final StringBuilder sb = new StringBuilder("on")
+         .append(isCh ? "Characteristic" : "Descriptor")
+         .append(changed ? "Changed" : read ? "Read" : "Write")
+         .append('(')
+         .append(gatt.getDevice().getAddress())
+         .append(", ")
+         .append(serviceUuid)
+         .append(", ")
+         .append(ch.getUuid());
+      
+      if (!isCh) {
+         sb
+            .append(", ")
+            .append(descr.getUuid());
+      }
+      
+      sb
+         .append(", ")
+         .append(status);
+      
+      Log.d(TAG, sb.append(')').toString());
+      
+      final WritableMap params = putCommonGattParams(gatt, status);
+      
+      params.putString("serviceUuid", serviceUuid);
+      params.putString("characteristicUuid", ch.getUuid().toString());
+      
+      if (!isCh) {
+         params.putString("descriptorUuid", descr.getUuid().toString());
+      }
+      
+      if (changed || read) {
+         params.putArray("value", Utils.writableArrayFrom(isCh ? ch.getValue() : descr.getValue(), true));
+      }
+      
+      emit(isCh ? (changed ? CHARACTERISTIC_CHANGED : (read ? CHARACTERISTIC_READ :
+         CHARACTERISTIC_WRITTEN)) : (read ? DESCRIPTOR_READ : DESCRIPTOR_WRITTEN), params);
    }
    
    private BluetoothAdapter getAdapterEnsureEnabled() {
