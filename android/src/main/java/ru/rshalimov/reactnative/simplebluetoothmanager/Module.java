@@ -27,6 +27,7 @@ import android.bluetooth.le.ScanRecord;
 import android.bluetooth.le.ScanResult;
 import android.bluetooth.le.ScanSettings;
 
+import java.lang.StringBuilder;
 import java.util.Arrays;
 import java.util.ArrayList;
 import java.util.List;
@@ -95,14 +96,17 @@ class Module extends ReactContextBaseJavaModule {
       }
       
       @Override
-      public void onCharacteristicChanged(BluetoothGatt gatt, BluetoothGattCharacteristic ch) {
-         super.onCharacteristicChanged(gatt, characteristic);
+      public void onCharacteristicChanged(
+         BluetoothGatt gatt,
+         BluetoothGattCharacteristic ch)
+      {
+         super.onCharacteristicChanged(gatt, ch);
          
          onReadWrittenChanged(gatt, ch, null, BluetoothGatt.GATT_SUCCESS);
       }
       
       @Override
-      void onDescriptorRead(
+      public void onDescriptorRead(
          BluetoothGatt gatt,
          BluetoothGattDescriptor descriptor,
          int status)
@@ -113,7 +117,7 @@ class Module extends ReactContextBaseJavaModule {
       }
       
       @Override
-      void onDescriptorWrite(
+      public void onDescriptorWrite(
          BluetoothGatt gatt,
          BluetoothGattDescriptor descriptor,
          int status)
@@ -353,34 +357,8 @@ class Module extends ReactContextBaseJavaModule {
       ReadableMap dataAndOptions,
       Promise promise)
    {
-      try {
-         final BluetoothGatt gatt = getGatt(address);
-         
-         final BluetoothGattCharacteristic ch = getCharacteristic(
-            gatt, serviceUuid, characteristicUuid);
-         
-         final byte [] value = Utils.createByteArray(
-            dataAndOptions.getArray("value"));
-         
-         final String logString = String.format("(%s, %s, %s, %s)", address,
-            serviceUuid, characteristicUuid, Arrays.toString(value));
-         
-         if (!ch.setValue(value)) {
-            throw new IllegalStateException(String.format(
-               "Characteristic.setValue() failed for %s", logString));
-         }
-         
-         if (!gatt.writeCharacteristic(ch)) {
-            throw new IllegalStateException(String.format(
-               "BluetoothGatt.writeCharacteristic() failed for %s", logString));
-         }
-         
-         Log.d(TAG, String.format("writeCharacteristic%s", logString));
-         
-         promise.resolve(null);
-      } catch (IllegalStateException | IllegalArgumentException e) {
-         promise.reject("", e.getMessage());
-      }
+      write(address, serviceUuid, characteristicUuid,
+         null, dataAndOptions, promise);
    }
    
    @ReactMethod
@@ -422,35 +400,8 @@ class Module extends ReactContextBaseJavaModule {
       ReadableMap dataAndOptions,
       Promise promise)
    {
-      try {
-         final BluetoothGatt gatt = getGatt(address);
-         
-         final BluetoothGattDescriptor descr = getDescriptor(
-            gatt, serviceUuid, characteristicUuid, descriptorUuid);
-         
-         final byte [] value = Utils.createByteArray(
-            dataAndOptions.getArray("value"));
-         
-         final String logString = String.format("(%s, %s, %s, %s, %s)",
-            address, serviceUuid, characteristicUuid, descriptorUuid,
-               Arrays.toString(value));
-         
-         if (!descr.setValue(value)) {
-            throw new IllegalStateException(String.format(
-               "Descriptor.setValue() failed for %s", logString));
-         }
-         
-         if (!gatt.writeDescriptor(descr)) {
-            throw new IllegalStateException(String.format(
-               "BluetoothGatt.writeDescriptor() failed for %s", logString));
-         }
-         
-         Log.d(TAG, String.format("writeDescriptor%s", logString));
-         
-         promise.resolve(null);
-      } catch (IllegalStateException | IllegalArgumentException e) {
-         promise.reject("", e.getMessage());
-      }
+      write(address, serviceUuid, characteristicUuid,
+         descriptorUuid, dataAndOptions, promise);
    }
    
    @ReactMethod
@@ -608,31 +559,108 @@ class Module extends ReactContextBaseJavaModule {
    
    private BluetoothGattDescriptor getDescriptor(
       BluetoothGatt gatt,
-      String serviceUuid,
-      String characteristicUuid,
+      BluetoothGattCharacteristic ch,
       String descriptorUuid)
    {
-      final BluetoothGattCharacteristic ch =
-         getCharacteristic(gatt, serviceUuid, characteristicUuid);
-      
       final BluetoothGattDescriptor descr = ch.getDescriptor(
          UUID.fromString(descriptorUuid));
       
       if (descr == null) {
          throw new IllegalArgumentException(String.format(
             "Characteristic '%s' of service '%s' of '%s' has no descriptor with " +
-               "uuid '%s'", characteristicUuid, serviceUuid, gatt.getDevice().
-                  getAddress(), descriptorUuid));
+               "uuid '%s'", ch.getUuid(), ch.getService().getUuid(), gatt.
+                  getDevice().getAddress(), descriptorUuid));
       }
       
       return descr;
    }
    
-   private void onReadWrittenChanged(BluetoothGatt gatt, Object object, Boolean read, int status) {
+   private void write(
+      String address,
+      String serviceUuid,
+      String characteristicUuid,
+      String descriptorUuid,
+      ReadableMap dataAndOptions,
+      Promise promise)
+   {
+      try {
+         final BluetoothGatt gatt = getGatt(address);
+         
+         final BluetoothGattCharacteristic ch = getCharacteristic(
+            gatt, serviceUuid, characteristicUuid);
+         
+         final BluetoothGattDescriptor descr = descriptorUuid ==
+            null ? null : getDescriptor(gatt, ch, descriptorUuid);
+         
+         final byte [] value = Utils.createByteArray(
+            dataAndOptions.getArray("value"));
+         
+         final StringBuilder sb = new StringBuilder('(')
+            .append(address)
+            .append(", ")
+            .append(serviceUuid)
+            .append(", ")
+            .append(characteristicUuid);
+         
+         if (descriptorUuid != null) {
+            sb
+               .append(", ")
+               .append(descriptorUuid);
+         }
+         
+         sb
+            .append(", ")
+            .append(Arrays.toString(value));
+         
+         if (descr == null) {
+            if (!ch.setValue(value)) {
+               throw new IllegalStateException(sb
+                  .insert(0, "Characteristic.setValue() failed for ")
+                  .toString());
+            }
+            
+            if (!gatt.writeCharacteristic(ch)) {
+               throw new IllegalStateException(sb
+                  .insert(0, "BluetoothGatt.writeCharacteristic() failed for ")
+                  .toString());
+            }
+            
+            sb.insert(0, "writeCharacteristic");
+         } else {
+            if (!descr.setValue(value)) {
+               throw new IllegalStateException(sb
+                  .insert(0, "Descriptor.setValue() failed for ")
+                  .toString());
+            }
+            
+            if (!gatt.writeDescriptor(descr)) {
+               throw new IllegalStateException(sb
+                  .insert(0, "BluetoothGatt.writeDescriptor() failed for ")
+                  .toString());
+            }
+            
+            sb.insert(0, "writeDescriptor");
+         }
+         
+         Log.d(TAG, sb.toString());
+         
+         promise.resolve(null);
+      } catch (IllegalStateException | IllegalArgumentException e) {
+         promise.reject("", e.getMessage());
+      }
+   }
+   
+   private void onReadWrittenChanged(
+      BluetoothGatt gatt,
+      Object object,
+      Boolean read,
+      int status)
+   {
       final boolean isCh = object instanceof BluetoothGattCharacteristic;
       final boolean changed = read == null;
       
-      final BluetoothGattDescriptor descr = isCh ? null : (BluetoothGattDescriptor)object;
+      final BluetoothGattDescriptor descr = isCh ?
+         null : (BluetoothGattDescriptor)object;
       
       final BluetoothGattCharacteristic ch = isCh ?
          (BluetoothGattCharacteristic)object : descr.getCharacteristic();
@@ -671,11 +699,13 @@ class Module extends ReactContextBaseJavaModule {
       }
       
       if (changed || read) {
-         params.putArray("value", Utils.writableArrayFrom(isCh ? ch.getValue() : descr.getValue(), true));
+         params.putArray("value", Utils.writableArrayFrom(
+            isCh ? ch.getValue() : descr.getValue(), true));
       }
       
       emit(isCh ? (changed ? CHARACTERISTIC_CHANGED : (read ? CHARACTERISTIC_READ :
-         CHARACTERISTIC_WRITTEN)) : (read ? DESCRIPTOR_READ : DESCRIPTOR_WRITTEN), params);
+         CHARACTERISTIC_WRITTEN)) : (read ? DESCRIPTOR_READ : DESCRIPTOR_WRITTEN),
+            params);
    }
    
    private BluetoothAdapter getAdapterEnsureEnabled() {
