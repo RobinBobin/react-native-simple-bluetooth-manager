@@ -37,6 +37,14 @@ export default class BluetoothDevice {
          return this._addListener(bt.events.gatt.CHARACTERISTIC_CHANGED, l);
       }
       
+      setOnDescriptorReadListener(l) {
+         return this._addListener(bt.events.gatt.DESCRIPTOR_READ, l);
+      }
+      
+      setOnDescriptorWrittenListener(l) {
+         return this._addListener(bt.events.gatt.DESCRIPTOR_WRITTEN, l);
+      }
+      
       build() {
          return new BluetoothDevice(this);
       }
@@ -128,9 +136,14 @@ export default class BluetoothDevice {
       }
    }
    
-   async setCharacteristicNotification(serviceUuid, characteristicUuid, enable) {
+   async setCharacteristicNotification(
+      serviceUuid,
+      characteristicUuid,
+      enable,
+      options)
+   {
       await bt.setCharacteristicNotification(this.getId(),
-         serviceUuid, characteristicUuid, enable);
+         serviceUuid, characteristicUuid, enable, options);
       
       await this._safeReadWrite(false, [
          serviceUuid,
@@ -138,6 +151,15 @@ export default class BluetoothDevice {
          "00002902-0000-1000-8000-00805f9b34fb",
          {value: [+enable, 0]}
       ]);
+   }
+   
+   async readDescriptor(
+      serviceUuid,
+      characteristicUuid,
+      descriptorUuid,
+      options)
+   {
+      await this._safeReadWrite(true, arguments);
    }
    
    async writeDescriptor(
@@ -156,14 +178,23 @@ export default class BluetoothDevice {
    async _safeReadWrite(read, params) {
       const operation = read ? "read" : "write";
       const requests = this.requests[operation];
-      const descrOp = params.length == 4;
       
-      const request = params.length ? {
-         serviceUuid: params[0],
-         characteristicUuid: params[1],
-         descriptorUuid: descrOp ? params[2] : undefined,
-         obj: params[descrOp ? 3 : 2]
-      } : (requests.shift(), requests[0]);
+      let request;
+      
+      if (!params.length) {
+         requests.shift();
+         request = requests[0];
+      } else {
+         request = {
+            serviceUuid: params[0],
+            characteristicUuid: params[1],
+            obj: params[params.length - 1]
+         };
+         
+         if (params.length == 4) {
+            request.descriptorUuid = params[2];
+         };
+      }
       
       if (request != undefined && (!params.length || !requests.length)) {
          const ar = [
@@ -171,6 +202,8 @@ export default class BluetoothDevice {
             request.serviceUuid,
             request.characteristicUuid,
          ];
+         
+         const descrOp = request.hasOwnProperty("descriptorUuid");
          
          if (descrOp) {
             ar.push(request.descriptorUuid);

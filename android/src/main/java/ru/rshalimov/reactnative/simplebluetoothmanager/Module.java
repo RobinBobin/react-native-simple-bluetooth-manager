@@ -28,6 +28,7 @@ import android.bluetooth.le.ScanResult;
 import android.bluetooth.le.ScanSettings;
 
 import java.lang.StringBuilder;
+import java.lang.reflect.Method;
 import java.util.Arrays;
 import java.util.ArrayList;
 import java.util.List;
@@ -157,7 +158,59 @@ class Module extends ReactContextBaseJavaModule {
       }
    }
    
-   static final String
+   private static final class WriteCharacteristicDescriptorData {
+      private final Method setValue;
+      private final Method write;
+      private final String setValueError;
+      private final String writeError;
+      
+      WriteCharacteristicDescriptorData(boolean isCharacteristic) {
+         try {
+            final Class <?> clazz = isCharacteristic ?
+               BluetoothGattCharacteristic.class : BluetoothGattDescriptor.class;
+            
+            setValue = clazz.getMethod("setValue", byte[].class);
+            
+            write = BluetoothGatt.class.getMethod(isCharacteristic ?
+               "writeCharacteristic" : "writeDescriptor", clazz);
+            
+            setValueError = String.format("%s.setValue() failed for ",
+               clazz.getSimpleName());
+            
+            writeError = String.format("BluetoothGatt.%s() failed for ",
+               write.getName());
+         } catch (NoSuchMethodException e) {
+            throw new RuntimeException(e);
+         }
+      }
+      
+      void write(
+         Object setValueObject,
+         byte [] value,
+         BluetoothGatt gatt,
+         StringBuilder sb)
+      {
+         try {
+            if (!(Boolean)setValue.invoke(setValueObject, value)) {
+               throw new IllegalStateException(sb
+                  .insert(0, setValueError)
+                  .toString());
+            }
+            
+            if (!(Boolean)write.invoke(gatt, setValueObject)) {
+               throw new IllegalStateException(sb
+                  .insert(0, writeError)
+                  .toString());
+            }
+            
+            sb.insert(0, write.getName());
+         } catch (ReflectiveOperationException e) {
+            throw new IllegalStateException(e);
+         }
+      }
+   }
+   
+   private static final String
       TAG = "SimpleBluetoothManager",
       CONNECTED = "CONNECTED",
       CONNECTING = "CONNECTING",
@@ -172,7 +225,14 @@ class Module extends ReactContextBaseJavaModule {
       SCAN_FAILED = "SCAN_FAILED",
       SCAN_RESULT = "SCAN_RESULT";
    
+   private static final WriteCharacteristicDescriptorData
+      writeCharacteristicData = new WriteCharacteristicDescriptorData(true);
+      
+   private static final WriteCharacteristicDescriptorData
+      writeDescriptorData = new WriteCharacteristicDescriptorData(false);
+   
    private final Map <String, BluetoothGatt> gatts = new HashMap <> ();
+   private final Map <String, Map <String, Object>> readOptions = new HashMap <> ();
    private final BTGattCallback btGattCallback = new BTGattCallback();
    private final ScanCallback scanCallback = new ScanCallback();
    
@@ -367,13 +427,14 @@ class Module extends ReactContextBaseJavaModule {
       String serviceUuid,
       String characteristicUuid,
       Boolean enable,
+      ReadableMap options,
       Promise promise)
    {
       try {
          final BluetoothGatt gatt = getGatt(address);
          
-         final String logString = String.format("(%s, %s, %s, %s)",
-            address, serviceUuid, characteristicUuid, enable);
+         final String logString = String.format("(%s, %s, %s, %s, %s)",
+            address, serviceUuid, characteristicUuid, enable, options);
          
          if (!gatt.setCharacteristicNotification(getCharacteristic(
             gatt, serviceUuid, characteristicUuid), enable))
@@ -381,6 +442,15 @@ class Module extends ReactContextBaseJavaModule {
             throw new IllegalStateException(String.format(
                "BluetoothGatt.setCharacteristicNotification() failed for %s",
                   logString));
+         }
+         
+         final String readOptionsKey = getReadOptionsKey(
+            address, serviceUuid, characteristicUuid);
+         
+         if (!enable) {
+            readOptions.remove(readOptionsKey);
+         } else if (options != null) {
+            readOptions.put(readOptionsKey, options.toHashMap());
          }
          
          Log.d(TAG, String.format("setCharacteristicNotification%s", logString));
@@ -595,7 +665,7 @@ class Module extends ReactContextBaseJavaModule {
          final byte [] value = Utils.createByteArray(
             dataAndOptions.getArray("value"));
          
-         final StringBuilder sb = new StringBuilder('(')
+         final StringBuilder sb = new StringBuilder("(")
             .append(address)
             .append(", ")
             .append(serviceUuid)
@@ -610,37 +680,11 @@ class Module extends ReactContextBaseJavaModule {
          
          sb
             .append(", ")
-            .append(Arrays.toString(value));
+            .append(Arrays.toString(value))
+            .append(')');
          
-         if (descr == null) {
-            if (!ch.setValue(value)) {
-               throw new IllegalStateException(sb
-                  .insert(0, "Characteristic.setValue() failed for ")
-                  .toString());
-            }
-            
-            if (!gatt.writeCharacteristic(ch)) {
-               throw new IllegalStateException(sb
-                  .insert(0, "BluetoothGatt.writeCharacteristic() failed for ")
-                  .toString());
-            }
-            
-            sb.insert(0, "writeCharacteristic");
-         } else {
-            if (!descr.setValue(value)) {
-               throw new IllegalStateException(sb
-                  .insert(0, "Descriptor.setValue() failed for ")
-                  .toString());
-            }
-            
-            if (!gatt.writeDescriptor(descr)) {
-               throw new IllegalStateException(sb
-                  .insert(0, "BluetoothGatt.writeDescriptor() failed for ")
-                  .toString());
-            }
-            
-            sb.insert(0, "writeDescriptor");
-         }
+         (descr == null ? writeCharacteristicData : writeDescriptorData).
+            write(descr == null ? ch : descr, value, gatt, sb);
          
          Log.d(TAG, sb.toString());
          
@@ -665,42 +709,52 @@ class Module extends ReactContextBaseJavaModule {
       final BluetoothGattCharacteristic ch = isCh ?
          (BluetoothGattCharacteristic)object : descr.getCharacteristic();
       
+      final String address = gatt.getDevice().getAddress();
       final String serviceUuid = ch.getService().getUuid().toString();
+      final String characteristicUuid = ch.getUuid().toString();
+      
+      final String descriptorUuid = descr != null ?
+         descr.getUuid().toString() : null;
       
       final StringBuilder sb = new StringBuilder("on")
          .append(isCh ? "Characteristic" : "Descriptor")
          .append(changed ? "Changed" : read ? "Read" : "Write")
          .append('(')
-         .append(gatt.getDevice().getAddress())
+         .append(address)
          .append(", ")
          .append(serviceUuid)
          .append(", ")
-         .append(ch.getUuid());
+         .append(characteristicUuid);
       
-      if (!isCh) {
+      if (descriptorUuid != null) {
          sb
             .append(", ")
-            .append(descr.getUuid());
+            .append(descriptorUuid);
       }
       
       sb
          .append(", ")
-         .append(status);
+         .append(status)
+         .append(')');
       
-      Log.d(TAG, sb.append(')').toString());
+      Log.d(TAG, sb.toString());
       
       final WritableMap params = putCommonGattParams(gatt, status);
       
       params.putString("serviceUuid", serviceUuid);
-      params.putString("characteristicUuid", ch.getUuid().toString());
+      params.putString("characteristicUuid", characteristicUuid);
       
-      if (!isCh) {
-         params.putString("descriptorUuid", descr.getUuid().toString());
+      if (descriptorUuid != null) {
+         params.putString("descriptorUuid", descriptorUuid);
       }
       
       if (changed || read) {
-         params.putArray("value", Utils.writableArrayFrom(
-            isCh ? ch.getValue() : descr.getValue(), true));
+         final Map <String, Object> options = readOptions.get(getReadOptionsKey(
+            address, serviceUuid, characteristicUuid, descriptorUuid));
+         
+         params.putArray("value", Utils.writableArrayFrom(isCh ? ch.getValue() :
+            descr.getValue(), options == null || !options.containsKey(
+               "valueUnsigned") ? true : !(Boolean)options.get("valueUnsigned")));
       }
       
       emit(isCh ? (changed ? CHARACTERISTIC_CHANGED : (read ? CHARACTERISTIC_READ :
@@ -751,5 +805,17 @@ class Module extends ReactContextBaseJavaModule {
       }
       
       return builder.build();
+   }
+   
+   private String getReadOptionsKey(String ... parts) {
+      final StringBuilder sb = new StringBuilder();
+      
+      for (String part : parts) {
+         if (part != null) {
+            sb.append(part);
+         }
+      }
+      
+      return sb.toString();
    }
 }

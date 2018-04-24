@@ -27,11 +27,11 @@ export default class Bluetooth {
       return bt.isEnabled();
    }
    
-   startScan(options = {}) {
-      return bt.startScan(options);
+   async startScan(options = {}) {
+      await bt.startScan(options);
    }
    
-   stopScan() {
-      return bt.stopScan();
+   async stopScan() {
+      await bt.stopScan();
    }
 }
