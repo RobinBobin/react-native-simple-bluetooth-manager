@@ -154,7 +154,7 @@ enum Errors : Error {
          peripherals[didDiscover.identifier.uuidString] = CBPeripheralData(didDiscover);
          
          let data: Data? = advertisementData[CBAdvertisementDataManufacturerDataKey] as? Data;
-         let ubytes: [UInt8] = data == nil ? [UInt8]() : [UInt8](data);
+         let ubytes: [UInt8] = data == nil ? [UInt8]() : [UInt8](data!);
          
          self.emit(SCAN_RESULT, [
             "results": [[
@@ -164,8 +164,8 @@ enum Errors : Error {
                ],
                "rssi": rssi,
                "scanRecord": [
-                  "bytes": advertisementDataUnsigned ? ubytes : ubytes.map {Int8(bitPattern: $0},
-                  "name": localName as Any
+                  "bytes": (advertisementDataUnsigned ? ubytes : ubytes.map {Int8(bitPattern: $0)}) as Any,
+                  "name": localName!
                ]
                ]]]);
       }
@@ -369,7 +369,7 @@ enum Errors : Error {
       
       for part in parts {
          if part != nil {
-            key += part;
+            key += part!;
          }
       }
       
@@ -383,12 +383,12 @@ enum Errors : Error {
       _ error: Error?)
    {
       let isCh = characteristicOrDescriptor is CBCharacteristic;
-      let descriptor: CBDescriptor? = isCh ? nil : characteristicOrDescriptor as! CBDescriptor;
+      let descriptor: CBDescriptor? = isCh ? nil : (characteristicOrDescriptor as! CBDescriptor);
       let characteristic = isCh ? characteristicOrDescriptor as! CBCharacteristic : descriptor!.characteristic;
       
       let serviceUuid = characteristic.service.uuid.uuidString;
       let characteristicUuid = characteristic.uuid.uuidString;
-      let descriptorUuid: String? = isCh ? nil : descriptor.uuid.uuidString;
+      let descriptorUuid: String? = isCh ? nil : descriptor!.uuid.uuidString;
       
       var params = putCommonGattParams(peripheral, error);
       
@@ -402,7 +402,7 @@ enum Errors : Error {
          
          let value = [UInt8](characteristic.value!);
          
-         params["value"] = options != nil && options["valueUnsigned"] as! Bool ? value : value.map {Int8(bitPattern: $0)};
+         params["value"] = options != nil && options!["valueUnsigned"] as! Bool ? value : value.map {Int8(bitPattern: $0)};
       }
       
       emit(isCh ? (read ? (characteristic.isNotifying ? CHARACTERISTIC_CHANGED : CHARACTERISTIC_READ) : CHARACTERISTIC_WRITTEN) : (read ? DESCRIPTOR_READ : DESCRIPTOR_WRITTEN), params);
