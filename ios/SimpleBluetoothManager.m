@@ -54,6 +54,7 @@ RCT_EXTERN_METHOD(setCharacteristicNotification:
    serviceUuid: (NSString *)serviceUuid
    characteristicUuid: (NSString *)characteristicUuid
    enable: (BOOL)enable
+   options: (NSDictionary *)options
    resolver: (RCTPromiseResolveBlock)resolver
    rejecter: (RCTPromiseRejectBlock)rejecter)
 

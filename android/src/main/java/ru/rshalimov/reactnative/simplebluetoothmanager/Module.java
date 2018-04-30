@@ -447,10 +447,10 @@ class Module extends ReactContextBaseJavaModule {
          final String readOptionsKey = getReadOptionsKey(
             address, serviceUuid, characteristicUuid);
          
-         if (!enable) {
-            readOptions.remove(readOptionsKey);
-         } else if (options != null) {
+         if (enable && options != null) {
             readOptions.put(readOptionsKey, options.toHashMap());
+         } else {
+            readOptions.remove(readOptionsKey);
          }
          
          Log.d(TAG, String.format("setCharacteristicNotification%s", logString));

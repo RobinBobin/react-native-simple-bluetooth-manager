@@ -95,8 +95,9 @@ enum Errors : Error {
 {
    var manager: CBCentralManager?;
    var peripherals = [String: CBPeripheralData]();
-   var scanFilters: [ScanFilter] = [];
+   var scanFilters = [ScanFilter]();
    var advertisementDataUnsigned = true;
+   var readOptions = [String: [String: Any]]();
    
    override init() {
       super.init();
@@ -152,22 +153,8 @@ enum Errors : Error {
       if emit ?? true {
          peripherals[didDiscover.identifier.uuidString] = CBPeripheralData(didDiscover);
          
-         var bytes: [Int8]? = advertisementDataUnsigned ? nil : [];
-         var ubytes: [UInt8]? = advertisementDataUnsigned ? [] : nil;
-         
          let data: Data? = advertisementData[CBAdvertisementDataManufacturerDataKey] as? Data;
-         
-         if data != nil {
-            if bytes == nil {
-               for uint8 in data! {
-                  ubytes!.append(uint8);
-               }
-            } else {
-               for uint8 in data! {
-                  bytes!.append(uint8 < 128 ? Int8(uint8) : Int8(Int16(uint8) - 256));
-               }
-            }
-         }
+         let ubytes: [UInt8] = data == nil ? [UInt8]() : [UInt8](data);
          
          self.emit(SCAN_RESULT, [
             "results": [[
@@ -177,7 +164,7 @@ enum Errors : Error {
                ],
                "rssi": rssi,
                "scanRecord": [
-                  "bytes": bytes ?? ubytes as Any,
+                  "bytes": advertisementDataUnsigned ? ubytes : ubytes.map {Int8(bitPattern: $0},
                   "name": localName as Any
                ]
                ]]]);
@@ -222,12 +209,11 @@ enum Errors : Error {
    }
    
    func peripheral(_ peripheral: CBPeripheral, didWriteValueFor characteristic: CBCharacteristic, error: Error?) {
-      var params = putCommonGattParams(peripheral, error);
-      
-      params["serviceUuid"] = characteristic.service.uuid.uuidString;
-      params["characteristicUuid"] = characteristic.uuid.uuidString;
-      
-      emit(CHARACTERISTIC_WRITTEN, params);
+      onReadWrittenChanged(peripheral, characteristic, false, error);
+   }
+   
+   func peripheral(_ peripheral: CBPeripheral, didWriteValueFor descriptor: CBDescriptor, error: Error?) {
+      onReadWrittenChanged(peripheral, descriptor, false, error);
    }
    
    func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
@@ -267,7 +253,11 @@ enum Errors : Error {
    }
    
    func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
-      
+      onReadWrittenChanged(peripheral, characteristic, true, error);
+   }
+   
+   func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor descriptor: CBDescriptor, error: Error?) {
+      onReadWrittenChanged(peripheral, descriptor, true, error);
    }
    
    func emit(_ eventName: String, _ params: [String: Any]) {
@@ -374,8 +364,52 @@ enum Errors : Error {
          Errors.invalidDescriptorUuid(peripheralUuid: peripheral.identifier.uuidString, serviceUuid: serviceUuid, characteristicUuid: characteristicUuid, descriptorUuid: descriptorUuid));
    }
    
+   func getReadOptionsKey(_ parts: String?...) -> String {
+      var key = "";
+      
+      for part in parts {
+         if part != nil {
+            key += part;
+         }
+      }
+      
+      return key;
+   }
+   
+   func onReadWrittenChanged(
+      _ peripheral: CBPeripheral,
+      _ characteristicOrDescriptor: CBAttribute,
+      _ read: Bool,
+      _ error: Error?)
+   {
+      let isCh = characteristicOrDescriptor is CBCharacteristic;
+      let descriptor: CBDescriptor? = isCh ? nil : characteristicOrDescriptor as! CBDescriptor;
+      let characteristic = isCh ? characteristicOrDescriptor as! CBCharacteristic : descriptor!.characteristic;
+      
+      let serviceUuid = characteristic.service.uuid.uuidString;
+      let characteristicUuid = characteristic.uuid.uuidString;
+      let descriptorUuid: String? = isCh ? nil : descriptor.uuid.uuidString;
+      
+      var params = putCommonGattParams(peripheral, error);
+      
+      params["serviceUuid"] = serviceUuid;
+      params["characteristicUuid"] = characteristicUuid;
+      params["descriptorUuid"] = descriptorUuid;
+      
+      // TODO read descriptor
+      if read && isCh {
+         let options = readOptions[getReadOptionsKey(peripheral.identifier.uuidString, serviceUuid, characteristicUuid, descriptorUuid)];
+         
+         let value = [UInt8](characteristic.value!);
+         
+         params["value"] = options != nil && options["valueUnsigned"] as! Bool ? value : value.map {Int8(bitPattern: $0)};
+      }
+      
+      emit(isCh ? (read ? (characteristic.isNotifying ? CHARACTERISTIC_CHANGED : CHARACTERISTIC_READ) : CHARACTERISTIC_WRITTEN) : (read ? DESCRIPTOR_READ : DESCRIPTOR_WRITTEN), params);
+   }
+   
    @objc override func constantsToExport() -> [AnyHashable: Any] {
-      var events: [String: [String: String]] = [:];
+      var events = [String: [String: String]]();
       
       [
          "connectionState": [
@@ -522,16 +556,8 @@ enum Errors : Error {
    {
       do {
          let peripheral = try getPeripheralData(peripheralUuid).peripheral;
-         let value = dataAndOptions["value"] as! Array <Int>;
          
-         var data = [UInt8]();
-         data.reserveCapacity(value.count);
-         
-         for byte in value {
-            data.append(UInt8(byte >= 0 ? byte : byte + 256));
-         }
-         
-         peripheral.writeValue(Data(data), for: try getCharacteristic(peripheral, serviceUuid, characteristicUuid), type: CBCharacteristicWriteType.withResponse)
+         peripheral.writeValue(Data((dataAndOptions["value"] as! [Int8]).map {UInt8(bitPattern: $0)}), for: try getCharacteristic(peripheral, serviceUuid, characteristicUuid), type: CBCharacteristicWriteType.withResponse)
          
          resolver(nil);
       } catch {
@@ -544,13 +570,17 @@ enum Errors : Error {
       serviceUuid: String,
       characteristicUuid: String,
       enable: Bool,
+      options: [String: Any],
       resolver: RCTPromiseResolveBlock,
       rejecter: RCTPromiseRejectBlock)
    {
       do {
          let peripheral = try getPeripheralData(peripheralUuid).peripheral;
+         let characteristic = try getCharacteristic(peripheral, serviceUuid, characteristicUuid);
          
-         peripheral.setNotifyValue(enable, for: try getCharacteristic(peripheral, serviceUuid, characteristicUuid));
+         peripheral.setNotifyValue(enable, for: characteristic);
+         
+         readOptions[getReadOptionsKey(peripheralUuid, serviceUuid, characteristicUuid)] = enable ? options : nil;
          
          resolver(nil);
       } catch {
