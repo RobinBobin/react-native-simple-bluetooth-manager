@@ -119,20 +119,20 @@ export default class BluetoothDevice {
          || dataAndOptions.value.length <= dataAndOptions.chunkSize)
       {
          await this._safeReadWrite(false, arguments);
-      }
-      
-      if (dataAndOptions.chunkSize <= 0) {
-         throw new Error(`dataAndOptions.chunkSize (${
-            dataAndOptions.chunkSize}) can't be <= 0`);
-      }
-      
-      for (let i = 0; i < dataAndOptions.value.length;) {
-         await this._safeReadWrite(false, [
-            serviceUuid,
-            characteristicUuid,
-            Object.assign({}, dataAndOptions, {value: dataAndOptions.
-               value.slice(i, i += dataAndOptions.chunkSize)})
-         ]);
+      } else {
+         if (dataAndOptions.chunkSize <= 0) {
+            throw new Error(`dataAndOptions.chunkSize (${
+               dataAndOptions.chunkSize}) can't be <= 0`);
+         }
+         
+         for (let i = 0; i < dataAndOptions.value.length;) {
+            await this._safeReadWrite(false, [
+               serviceUuid,
+               characteristicUuid,
+               Object.assign({}, dataAndOptions, {value: dataAndOptions.
+                  value.slice(i, i += dataAndOptions.chunkSize)})
+            ]);
+         }
       }
    }
    
