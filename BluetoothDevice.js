@@ -1,6 +1,7 @@
 import {
    NativeModules,
-   NativeEventEmitter
+   NativeEventEmitter,
+   Platform
 } from "react-native";
 
 const bt = NativeModules.SimpleBluetoothManager;
@@ -145,12 +146,14 @@ export default class BluetoothDevice {
       await bt.setCharacteristicNotification(this.getId(),
          serviceUuid, characteristicUuid, enable, options);
       
-      await this._safeReadWrite(false, [
-         serviceUuid,
-         characteristicUuid,
-         "00002902-0000-1000-8000-00805f9b34fb",
-         {value: [+enable, 0]}
-      ]);
+      if (Platform.OS == "android") {
+         await this._safeReadWrite(false, [
+            serviceUuid,
+            characteristicUuid,
+            "00002902-0000-1000-8000-00805f9b34fb",
+            {value: [+enable, 0]}
+         ]);
+      }
    }
    
    async readDescriptor(
@@ -222,7 +225,7 @@ export default class BluetoothDevice {
       if (data.id.valueOf() == this.getId()) {
          switch (listener.eventType) {
             case bt.events.connectionState.CONNECTED:
-               this.connected = true;
+               this.connected = !data.error;
                break;
             
             case bt.events.connectionState.DISCONNECTED:
@@ -231,7 +234,7 @@ export default class BluetoothDevice {
                break;
             
             case bt.events.gatt.SERVICES_DISCOVERED:
-               this.servicesDiscovered = true;
+               this.servicesDiscovered = !data.error;
                break;
          }
          
