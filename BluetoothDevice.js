@@ -8,93 +8,87 @@ const bt = NativeModules.SimpleBluetoothManager;
 const emitter = new NativeEventEmitter(bt);
 
 export default class BluetoothDevice {
-   static Builder = class {
-      constructor(id) {
-         this.id = id || "";
-         this.listeners = [];
+   constructor(id) {
+      this._id = id || "";
+      this._listeners = {};
+      
+      for (let group of [ "connectionState", "gatt" ]) {
+         for (let eventType of Object.keys(bt.events[group])) {
+            this._listeners[eventType] = {
+               innerListener: emitter.addListener(eventType,
+                  this._innerListener.bind(this)),
+               listeners: []
+            };
+            
+            const indices = [0];
+            let index = -1;
+            
+            while ((index = eventType.indexOf("_", index + 1)) != -1) {
+               indices.push(index);
+            }
+            
+            let camelCased = Array.from(eventType.toLowerCase());
+            
+            for (let index of indices) {
+               if (index) {
+                  camelCased.splice(index, 1);
+               }
+               
+               camelCased[index] = camelCased[index].toUpperCase();
+            }
+            
+            camelCased = camelCased.join("");
+            
+            this[`addOn${camelCased}Listener`] = function(listener) {
+               this._listeners[eventType].listeners.push(listener);
+               
+               return this;
+            };
+            
+            this[`removeOn${camelCased}Listener`] = function(listener) {
+               const index = this._listeners[eventType].listeners.indexOf(listener);
+               
+               if (index != -1) {
+                  this._listeners[eventType].listeners.splice(index, 1);
+               }
+               
+               return this;
+            }
+         }
       }
       
-      setOnConnectedListener(l) {
-         return this._addListener(bt.events.connectionState.CONNECTED, l);
-      }
-      
-      setOnDisconnectedListener(l) {
-         return this._addListener(bt.events.connectionState.DISCONNECTED, l);
-      }
-      
-      setOnServicesDiscoveredListener(l) {
-         return this._addListener(bt.events.gatt.SERVICES_DISCOVERED, l);
-      }
-      
-      setOnCharacteristicReadListener(l) {
-         return this._addListener(bt.events.gatt.CHARACTERISTIC_READ, l);
-      }
-      
-      setOnCharacteristicWrittenListener(l) {
-         return this._addListener(bt.events.gatt.CHARACTERISTIC_WRITTEN, l);
-      }
-      
-      setOnCharacteristicChangedListener(l) {
-         return this._addListener(bt.events.gatt.CHARACTERISTIC_CHANGED, l);
-      }
-      
-      setOnDescriptorReadListener(l) {
-         return this._addListener(bt.events.gatt.DESCRIPTOR_READ, l);
-      }
-      
-      setOnDescriptorWrittenListener(l) {
-         return this._addListener(bt.events.gatt.DESCRIPTOR_WRITTEN, l);
-      }
-      
-      build() {
-         return new BluetoothDevice(this);
-      }
-      
-      _addListener(eventType, listener) {
-         this.listeners.push({eventType, listener});
-         
-         return this;
-      }
-   };
-   
-   constructor(builder) {
-      this.builder = builder;
-      
-      this.requests = {
+      this._requests = {
          read: [],
          write: []
       };
-      
-      for (let listener of this.builder.listeners) {
-         listener.innerListener = emitter.addListener(listener.
-            eventType, this._innerListener.bind(this, listener));
-      }
    }
    
    getId() {
-      return this.builder.id;
+      return this._id;
    }
    
    isConnected() {
-      return !!this.connected;
+      return !!this._connected;
    }
    
    areServicesDiscovered() {
-      return !!this.servicesDiscovered;
+      return !!this._servicesDiscovered;
    }
    
    flushRequests(read) {
       if (read == true || read == undefined) {
-         this.requests.read.length = 0;
+         this._requests.read.length = 0;
       }
       
       if (read == false || read == undefined) {
-         this.requests.write.length = 0;
+         this._requests.write.length = 0;
       }
    }
    
    removeAllListeners() {
-      this.builder.listeners.forEach(listener => listener.innerListener.remove());
+      for (let eventType of Object.keys(this._listeners)) {
+         this._listeners[eventType].innerListener.remove();
+      }
    }
    
    isValid() {
@@ -180,7 +174,7 @@ export default class BluetoothDevice {
    
    async _safeReadWrite(read, params) {
       const operation = read ? "read" : "write";
-      const requests = this.requests[operation];
+      const requests = this._requests[operation];
       
       let request;
       
@@ -221,24 +215,26 @@ export default class BluetoothDevice {
       params.length && requests.push(request);
    }
    
-   _innerListener(listener, data) {
+   _innerListener(data) {
       if (data.id.valueOf() == this.getId()) {
-         switch (listener.eventType) {
+         switch (data.eventName) {
             case bt.events.connectionState.CONNECTED:
-               this.connected = !data.error;
+               this._connected = !data.error;
                break;
             
             case bt.events.connectionState.DISCONNECTED:
-               this.connected = false;
-               this.servicesDiscovered = false;
+               this._connected = false;
+               this._servicesDiscovered = false;
                break;
             
             case bt.events.gatt.SERVICES_DISCOVERED:
-               this.servicesDiscovered = !data.error;
+               this._servicesDiscovered = !data.error;
                break;
          }
          
-         listener.listener(data);
+         for (let listener of this._listeners[data.eventName].listeners) {
+            listener(data);
+         }
       }
    }
 }
