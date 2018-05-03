@@ -14,11 +14,7 @@ export default class BluetoothDevice {
       
       for (let group of [ "connectionState", "gatt" ]) {
          for (let eventType of Object.keys(bt.events[group])) {
-            this._listeners[eventType] = {
-               innerListener: emitter.addListener(eventType,
-                  this._innerListener.bind(this)),
-               listeners: []
-            };
+            this._listeners[eventType] = { listeners: [] };
             
             const indices = [0];
             let index = -1;
@@ -61,6 +57,9 @@ export default class BluetoothDevice {
          read: [],
          write: []
       };
+      
+      this._failureHandler = console.log;
+      this._notifiedCharacteristics = {};
    }
    
    getId() {
@@ -75,6 +74,10 @@ export default class BluetoothDevice {
       return !!this._servicesDiscovered;
    }
    
+   isShutdownRequested() {
+      return !!this._shutdownRequested;
+   }
+   
    flushRequests(read) {
       if (read == true || read == undefined) {
          this._requests.read.length = 0;
@@ -85,10 +88,8 @@ export default class BluetoothDevice {
       }
    }
    
-   removeAllListeners() {
-      for (let eventType of Object.keys(this._listeners)) {
-         this._listeners[eventType].innerListener.remove();
-      }
+   setFailureHandler(failureHandler) {
+      this._failureHandler = failureHandler;
    }
    
    isValid() {
@@ -96,6 +97,11 @@ export default class BluetoothDevice {
    }
    
    async connectGatt(autoConnect = true) {
+      for (let eventType of Object.keys(this._listeners)) {
+         this._listeners[eventType].innerListener = emitter.
+            addListener(eventType, this._innerListener.bind(this))
+      }
+      
       await bt.connectGatt(this.getId(), autoConnect);
    }
    
@@ -137,6 +143,19 @@ export default class BluetoothDevice {
       enable,
       options)
    {
+      if (!enable) {
+         const position = this._notifiedCharacteristics
+            [serviceUuid].indexOf(characteristicUuid);
+         
+         if (position != -1) {
+            this._notifiedCharacteristics[serviceUuid].splice(position, 1);
+            
+            if (!this._notifiedCharacteristics[serviceUuid].length) {
+               delete this._notifiedCharacteristics[serviceUuid];
+            }
+         }
+      }
+      
       await bt.setCharacteristicNotification(this.getId(),
          serviceUuid, characteristicUuid, enable, options);
       
@@ -147,6 +166,14 @@ export default class BluetoothDevice {
             "00002902-0000-1000-8000-00805f9b34fb",
             {value: [+enable, 0]}
          ]);
+      }
+      
+      if (enable) {
+         if (!this._notifiedCharacteristics[serviceUuid]) {
+            this._notifiedCharacteristics[serviceUuid] = [];
+         }
+         
+         this._notifiedCharacteristics[serviceUuid].push(characteristicUuid);
       }
    }
    
@@ -169,10 +196,50 @@ export default class BluetoothDevice {
    }
    
    async closeGatt() {
+      for (let eventType of Object.keys(this._listeners)) {
+         this._listeners[eventType].innerListener.remove();
+      }
+      
       await bt.closeGatt(this.getId());
    }
    
-   async _safeReadWrite(read, params) {
+   shutdown() {
+      this._shutdownRequested = true;
+      
+      for (let eventType of Object.keys(this._listeners)) {
+         this._listeners[eventType].listeners.length = 0;
+      }
+      
+      this.flushRequests();
+      
+      const notificationsToStop = [];
+      
+      for (let srvcUuid of Object.keys(this._notifiedCharacteristics)) {
+         for (let characteristicUuid of this._notifiedCharacteristics[srvcUuid]) {
+            notificationsToStop.push(this.setCharacteristicNotification.bind(
+               this,
+               srvcUuid,
+               characteristicUuid,
+               false));
+         }
+      }
+      
+      this._writeCallbacksToReceive = notificationsToStop.length;
+      
+      for (let notificationToStop of notificationsToStop) {
+         notificationToStop().catch(error => {
+            this._failureHandler(error);
+            
+            this._writeCallbacksToReceive--;
+         });
+      }
+      
+      if (!this._writeCallbacksToReceive || Platform.OS == "ios") {
+         this.closeGatt().catch(this._failureHandler);
+      }
+   }
+   
+   async _safeReadWrite(read, params = []) {
       const operation = read ? "read" : "write";
       const requests = this._requests[operation];
       
@@ -225,6 +292,9 @@ export default class BluetoothDevice {
             case bt.events.connectionState.DISCONNECTED:
                this._connected = false;
                this._servicesDiscovered = false;
+               
+               this.flushRequests();
+               
                break;
             
             case bt.events.gatt.SERVICES_DISCOVERED:
@@ -234,6 +304,27 @@ export default class BluetoothDevice {
          
          for (let listener of this._listeners[data.eventName].listeners) {
             listener(data);
+         }
+         
+         const read =
+            (data.eventName == bt.events.gatt.CHARACTERISTIC_READ
+            || data.eventName == bt.events.gatt.DESCRIPTOR_READ) ? true :
+            
+            (data.eventName == bt.events.gatt.CHARACTERISTIC_WRITTEN
+            || data.eventName == bt.events.gatt.DESCRIPTOR_WRITTEN) ? false :
+            
+            undefined;
+         
+         if (read != undefined) {
+            this._safeReadWrite(read).catch(this._failureHandler);
+            
+            if (!read && this._writeCallbacksToReceive) {
+               this._writeCallbacksToReceive--;
+               
+               if (!this._writeCallbacksToReceive) {
+                  this.closeGatt().catch(this._failureHandler);
+               }
+            }
          }
       }
    }
