@@ -7,31 +7,47 @@ const bt = NativeModules.SimpleBluetoothManager;
 const emitter = new NativeEventEmitter(bt);
 
 export default class Bluetooth {
+   static scanMode = bt.scanMode;
+   
    constructor(onScanResultListener, onScanFailedListener) {
-      this.listeners = [];
+      this._listeners = [];
+      this._scanResults = [];
       
-      [
+      [[
          bt.events.leScanCallback.SCAN_RESULT,
-         bt.events.leScanCallback.SCAN_FAILED
-      ].forEach((eventType, index) => this.listeners.push(
-         emitter.addListener(eventType, arguments[index])));
-      
-      Bluetooth.scanMode = bt.scanMode;
+         onScanResultListener || (data => this._scanResults.push(data))
+      ], [
+         bt.events.leScanCallback.SCAN_FAILED,
+         onScanFailedListener || console.log
+      ]].forEach(data => this._listeners.push(
+         emitter.addListener(data[0], data[1])));
    }
    
    removeAllListeners() {
-      this.listeners.forEach(listener => listener.remove());
+      this._listeners.forEach(listener => listener.remove());
    }
    
    isEnabled() {
       return bt.isEnabled();
    }
    
-   async startScan(options = {}) {
+   async startScan(options = {}, millis) {
+      this._scanResults.length = 0;
+      
       await bt.startScan(options);
+      
+      if (millis) {
+         await new Promise(resolve => setTimeout(resolve, millis));
+         
+         await this.stopScan();
+      }
    }
    
    async stopScan() {
       await bt.stopScan();
+   }
+   
+   getScanResults() {
+      return Array.from(this._scanResults);
    }
 }
