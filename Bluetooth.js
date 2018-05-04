@@ -2,20 +2,21 @@ import {
    NativeModules,
    NativeEventEmitter
 } from "react-native";
+import { autobind } from "core-decorators"
 
 const bt = NativeModules.SimpleBluetoothManager;
 const emitter = new NativeEventEmitter(bt);
 
+@autobind
 export default class Bluetooth {
    static scanMode = bt.scanMode;
    
    constructor(onScanResultListener, onScanFailedListener) {
       this._listeners = [];
-      this._scanResults = [];
       
       [[
          bt.events.leScanCallback.SCAN_RESULT,
-         onScanResultListener || (data => this._scanResults.push(data))
+         onScanResultListener || this._onScanResult
       ], [
          bt.events.leScanCallback.SCAN_FAILED,
          onScanFailedListener || console.log
@@ -32,12 +33,39 @@ export default class Bluetooth {
    }
    
    async startScan(options = {}, millis) {
-      this._scanResults.length = 0;
+      this._scanResults = [];
+      this._scanOptions = { ...options };
       
-      await bt.startScan(options);
+      if (!millis) {
+         millis = this._scanOptions.millis;
+      }
+      
+      await bt.startScan(this._scanOptions);
+      
+      const promises = [];
+      let timeoutFired = false;
       
       if (millis) {
-         await new Promise(resolve => setTimeout(resolve, millis));
+         promises.push(new Promise(resolve => setTimeout(() => {
+            timeoutFired = true;
+            resolve();
+         }, millis)));
+      }
+      
+      if (this._scanOptions.deviceCount) {
+         promises.push(new Promise(async resolve => {
+            while (!timeoutFired && (this._scanOptions.
+               deviceCount != this._scanResults.length))
+            {
+               await new Promise(r => setTimeout(r, 100));
+            }
+            
+            resolve();
+         }));
+      }
+      
+      if (promises.length) {
+         await Promise.race(promises);
          
          await this.stopScan();
       }
@@ -49,5 +77,11 @@ export default class Bluetooth {
    
    getScanResults() {
       return Array.from(this._scanResults);
+   }
+   
+   _onScanResult(data) {
+      for (let result of data.results) {
+         this._scanResults.push(result);
+      }
    }
 }
