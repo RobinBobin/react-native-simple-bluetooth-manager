@@ -484,6 +484,7 @@ class Module extends ReactContextBaseJavaModule {
                "gatts.remove('%s') == null", gatt.getDevice().getAddress()));
          }
          
+         gatt.disconnect();
          gatt.close();
          
          Log.d(TAG, String.format("closeGatt('%s')", address));

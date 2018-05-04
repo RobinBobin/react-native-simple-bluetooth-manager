@@ -98,8 +98,12 @@ export default class BluetoothDevice {
    
    async connectGatt(autoConnect = true) {
       for (let eventType of Object.keys(this._listeners)) {
-         this._listeners[eventType].innerListener = emitter.
-            addListener(eventType, this._innerListener.bind(this))
+         const obj = this._listeners[eventType];
+         
+         if (!obj.innerListener) {
+            obj.innerListener = emitter.addListener(
+               eventType, this._innerListener.bind(this));
+         }
       }
       
       await bt.connectGatt(this.getId(), autoConnect);
@@ -197,7 +201,12 @@ export default class BluetoothDevice {
    
    async closeGatt() {
       for (let eventType of Object.keys(this._listeners)) {
-         this._listeners[eventType].innerListener.remove();
+         const obj = this._listeners[eventType];
+         
+         if (obj.innerListener) {
+            obj.innerListener.remove();
+            delete obj.innerListener;
+         }
       }
       
       await bt.closeGatt(this.getId());
