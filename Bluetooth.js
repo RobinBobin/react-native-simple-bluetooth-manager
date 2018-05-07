@@ -54,8 +54,11 @@ export default class Bluetooth {
       
       if (this._scanOptions.deviceCount) {
          promises.push(new Promise(async resolve => {
+            await new Promise(r => setTimeout(r,
+               this._scanOptions.minMillis || 2000))
+            
             while (!timeoutFired && (this._scanOptions.
-               deviceCount != this._scanResults.length))
+               deviceCount < this._scanResults.length))
             {
                await new Promise(r => setTimeout(r, 100));
             }
@@ -81,7 +84,11 @@ export default class Bluetooth {
    
    _onScanResult(data) {
       for (let result of data.results) {
-         this._scanResults.push(result);
+         if (!this._scanOptions.deviceCount || this.
+            _scanOptions.deviceCount > this._scanResults.length)
+         {
+            this._scanResults.push(result);
+         }
       }
    }
 }
