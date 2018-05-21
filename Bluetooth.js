@@ -20,7 +20,7 @@ export default class Bluetooth {
          onScanResultListener || this._onScanResult
       ], [
          bt.events.leScanCallback.SCAN_FAILED,
-         onScanFailedListener || console.log
+         onScanFailedListener || this._onScanFailed
       ]].forEach(data => this._listeners.push(
          emitter.addListener(data[0], data[1])));
    }
@@ -95,9 +95,15 @@ export default class Bluetooth {
    
    _onScanResult(data) {
       for (let result of data.results) {
-         this._scanOptions.deviceCount && (this._scanResults.
-            length == this._scanOptions.deviceCount) ? break :
-               this._scanResults.push(result);
+         if (this._scanResults.length == this._scanOptions.deviceCount) {
+            break;
+          } else {
+             this._scanResults.push(result);
+          }
       }
+   }
+   
+   _onScanFailed(data) {
+      console.log("Bluetooth._onScanFailed()", JSON.stringify(data));
    }
 }
