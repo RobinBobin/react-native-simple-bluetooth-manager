@@ -1,6 +1,7 @@
 import {
    NativeModules,
-   NativeEventEmitter
+   NativeEventEmitter,
+   Platform
 } from "react-native";
 import { autobind } from "core-decorators"
 
@@ -32,6 +33,10 @@ export default class Bluetooth {
       return bt.isEnabled();
    }
    
+   async isKnownDeviceId(id) {
+      return Platform.OS == "android" ? false : bt.isKnownDeviceId(id);
+   }
+   
    async startScan(options = {}, millis) {
       this._scanResults = [];
       this._scanOptions = { ...options };
@@ -39,6 +44,12 @@ export default class Bluetooth {
       if (!millis) {
          millis = this._scanOptions.millis;
       }
+      
+      if (!this._scanOptions.minMillis) {
+         this._scanOptions.minMillis = 2000;
+      }
+      
+      millis = Math.max(millis, this._scanOptions.minMillis);
       
       await bt.startScan(this._scanOptions);
       
@@ -55,10 +66,10 @@ export default class Bluetooth {
       if (this._scanOptions.deviceCount) {
          promises.push(new Promise(async resolve => {
             await new Promise(r => setTimeout(r,
-               this._scanOptions.minMillis || 2000))
+               this._scanOptions.minMillis))
             
             while (!timeoutFired && (this._scanOptions.
-               deviceCount < this._scanResults.length))
+               deviceCount > this._scanResults.length))
             {
                await new Promise(r => setTimeout(r, 100));
             }
@@ -84,11 +95,9 @@ export default class Bluetooth {
    
    _onScanResult(data) {
       for (let result of data.results) {
-         if (!this._scanOptions.deviceCount || this.
-            _scanOptions.deviceCount > this._scanResults.length)
-         {
-            this._scanResults.push(result);
-         }
+         this._scanOptions.deviceCount && (this._scanResults.
+            length == this._scanOptions.deviceCount) ? break :
+               this._scanResults.push(result);
       }
    }
 }

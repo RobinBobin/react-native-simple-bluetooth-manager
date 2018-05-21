@@ -27,6 +27,11 @@ RCT_EXTERN_METHOD(connectGatt:
    resolver: (RCTPromiseResolveBlock)resolver
    rejecter: (RCTPromiseRejectBlock)rejecter)
 
+RCT_EXTERN_METHOD(isKnownDeviceId:
+   (NSString *)uuid
+   resolver: (RCTPromiseResolveBlock)resolver
+   rejecter: (RCTPromiseRejectBlock)rejecter)
+
 RCT_EXTERN_METHOD(discoverServices:
    (NSString *)uuid
    useCache: (BOOL)useCache

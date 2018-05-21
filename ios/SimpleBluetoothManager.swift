@@ -513,6 +513,16 @@ enum Errors : Error {
       }
    }
    
+   @objc func isKnownDeviceId(
+      _ uuid: String,
+      resolver: RCTPromiseResolveBlock,
+      rejecter: RCTPromiseRejectBlock)
+   {
+      let ar = manager!.retrievePeripherals(withIdentifiers: [UUID(uuidString: uuid)!]);
+      
+      resolver(ar.count == 1);
+   }
+   
    @objc func discoverServices(
       _ uuid: String,
       useCache: Bool,
