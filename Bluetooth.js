@@ -51,6 +51,8 @@ export default class Bluetooth {
       
       millis = Math.max(millis, this._scanOptions.minMillis);
       
+      console.log(`Bluetooth.startScan(${JSON.stringify(this._scanOptions)}).`);
+      
       await bt.startScan(this._scanOptions);
       
       const promises = [];
@@ -86,6 +88,8 @@ export default class Bluetooth {
    }
    
    async stopScan() {
+      console.log("Bluetooth.stopScan().");
+      
       await bt.stopScan();
    }
    
@@ -97,9 +101,9 @@ export default class Bluetooth {
       for (let result of data.results) {
          if (this._scanResults.length == this._scanOptions.deviceCount) {
             break;
-          } else {
-             this._scanResults.push(result);
-          }
+         }
+         
+         this._scanResults.push(result);
       }
    }
    

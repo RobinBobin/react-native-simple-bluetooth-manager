@@ -14,7 +14,11 @@ export default class BluetoothDevice {
       
       for (let group of [ "connectionState", "gatt" ]) {
          for (let eventType of Object.keys(bt.events[group])) {
-            this._listeners[eventType] = { listeners: [] };
+            this._listeners[eventType] = {
+               listeners: [],
+               innerListener: emitter.addListener(
+                  eventType, this._innerListener.bind(this))
+            };
             
             const indices = [0];
             let index = -1;
@@ -96,28 +100,63 @@ export default class BluetoothDevice {
       return bt.isValid(this.getId());
    }
    
-   async connectGatt(autoConnect = true) {
-      for (let eventType of Object.keys(this._listeners)) {
-         const obj = this._listeners[eventType];
-         
-         if (!obj.innerListener) {
-            obj.innerListener = emitter.addListener(
-               eventType, this._innerListener.bind(this));
-         }
-      }
+   async connectGatt() {
+      this._throwIfShutdownRequested();
       
-      await bt.connectGatt(this.getId(), autoConnect);
+      this._connectionOptions = arguments.length ? arguments[0].constructor ==
+         Boolean ? { autoConnect: arguments[0] } : arguments[0] : {};
+      
+      [
+         "autoConnect",
+         "autoDiscoverServices",
+         "autoDiscoverServicesUseCache"
+      ].forEach(key => !this._connectionOptions.hasOwnProperty(key)
+         && (this._connectionOptions[key] = true));
+      
+      console.log(`BluetoothDevice.connectGatt('${this.getId()
+         }', ${JSON.stringify(this._connectionOptions)}).`);
+      
+      await bt.connectGatt(this.getId(), this._connectionOptions.autoConnect);
+   }
+   
+   async connect() {
+      this._throwIfShutdownRequested();
+      
+      console.log(`BluetoothDevice.connect('${this.getId()}').`);
+      
+      return await bt.connect(this.getId());
+   }
+   
+   async openConnection(options = {}) {
+      [
+         "invokeBTGattConnect",
+         "invokeBTGattDisconnect"
+      ].forEach(key => !options.hasOwnProperty(key) && (options[key] = true));
+      
+      await this.connectGatt(options);
+      
+      return options.invokeBTGattConnect && Platform.
+         OS == "android" ? await this.connect() : undefined;
    }
    
    async discoverServices(useCache = true) {
+      this._throwIfShutdownRequested();
+      
+      console.log(`BluetoothDevice.discoverServices(${
+         useCache}) for '${this.getId()}'.`);
+      
       await bt.discoverServices(this.getId(), useCache);
    }
    
    async readCharacteristic(serviceUuid, characteristicUuid, options) {
+      this._throwIfShutdownRequested();
+      
       await this._safeReadWrite(true, arguments);
    }
    
    async writeCharacteristic(serviceUuid, characteristicUuid, dataAndOptions) {
+      this._throwIfShutdownRequested();
+      
       if (!dataAndOptions
          || (dataAndOptions.chunkSize == undefined)
          || !Array.isArray(dataAndOptions.value)
@@ -147,6 +186,8 @@ export default class BluetoothDevice {
       enable,
       options)
    {
+      this._throwIfShutdownRequested();
+      
       if (!enable) {
          const position = this._notifiedCharacteristics
             [serviceUuid].indexOf(characteristicUuid);
@@ -160,17 +201,8 @@ export default class BluetoothDevice {
          }
       }
       
-      await bt.setCharacteristicNotification(this.getId(),
+      await this._setCharacteristicNotification(
          serviceUuid, characteristicUuid, enable, options);
-      
-      if (Platform.OS == "android") {
-         await this._safeReadWrite(false, [
-            serviceUuid,
-            characteristicUuid,
-            "00002902-0000-1000-8000-00805f9b34fb",
-            {value: [+enable, 0]}
-         ]);
-      }
       
       if (enable) {
          if (!this._notifiedCharacteristics[serviceUuid]) {
@@ -187,6 +219,8 @@ export default class BluetoothDevice {
       descriptorUuid,
       options)
    {
+      this._throwIfShutdownRequested();
+      
       await this._safeReadWrite(true, arguments);
    }
    
@@ -196,55 +230,80 @@ export default class BluetoothDevice {
       descriptorUuid,
       dataAndOptions)
    {
+      this._throwIfShutdownRequested();
+      
       await this._safeReadWrite(false, arguments);
    }
    
-   async closeGatt() {
-      for (let eventType of Object.keys(this._listeners)) {
-         const obj = this._listeners[eventType];
-         
-         if (obj.innerListener) {
-            obj.innerListener.remove();
-            delete obj.innerListener;
-         }
-      }
+   async disconnect() {
+      this._throwIfShutdownRequested();
       
-      await bt.closeGatt(this.getId());
+      await this._disconnect();
    }
    
-   shutdown() {
+   async closeGatt() {
+      this._throwIfShutdownRequested();
+      
+      await this._closeGatt();
+   }
+   
+   async shutdown(timeout = 10000) {
+      this._throwIfShutdownRequested();
+      
       this._shutdownRequested = true;
       
       for (let eventType of Object.keys(this._listeners)) {
          this._listeners[eventType].listeners.length = 0;
       }
       
-      this.flushRequests();
-      
-      const notificationsToStop = [];
-      
-      for (let srvcUuid of Object.keys(this._notifiedCharacteristics)) {
-         for (let characteristicUuid of this._notifiedCharacteristics[srvcUuid]) {
-            notificationsToStop.push(this.setCharacteristicNotification.bind(
-               this,
-               srvcUuid,
-               characteristicUuid,
-               false));
-         }
-      }
-      
-      this._writeCallbacksToReceive = notificationsToStop.length;
-      
-      for (let notificationToStop of notificationsToStop) {
-         notificationToStop().catch(error => {
-            this._failureHandler(error);
+      if (!this.isConnected()) {
+         this._removeInnerListeners();
+         
+         try {
+            if (
+               this._connectionOptions.invokeBTGattDisconnect
+               && Platform.OS == "android")
+            {
+               await this._disconnect();
+            }
             
-            this._writeCallbacksToReceive--;
-         });
-      }
-      
-      if (!this._writeCallbacksToReceive || Platform.OS == "ios") {
-         this.closeGatt().catch(this._failureHandler);
+            await this._closeGatt();
+         } catch (error) {
+            this._failureHandler(error);
+         }
+      } else {
+         for (let srvcUuid of Object.keys(this._notifiedCharacteristics)) {
+            for (let chrctrstcUuid of this._notifiedCharacteristics[srvcUuid]) {
+               this._setCharacteristicNotification(
+                  srvcUuid,
+                  chrctrstcUuid,
+                  false)
+               .catch(this._failureHandler);
+            }
+         }
+         
+         if (!this._requests.read.length && !this._requests.write.length) {
+            timeout = 0;
+         }
+         
+         await new Promise(resolve => setTimeout(resolve, timeout));
+         
+         console.log(`Shutting down BluetoothDevice connection with '${this.
+            getId()}'. R/W requests pending: ${this._requests.read.length + this.
+               _requests.write.length}.`);
+         
+         try {
+            if (Platform.OS == "ios") {
+               await this._closeGatt();
+            } else if (this._connectionOptions.invokeBTGattDisconnect) {
+               await this._disconnect();
+            } else {
+               this._removeInnerListeners();
+               await this._closeGatt();
+            }
+         } catch (error) {
+            this._failureHandler(error);
+         }
       }
    }
    
@@ -291,23 +350,54 @@ export default class BluetoothDevice {
       params.length && requests.push(request);
    }
    
+   _withError(data) {
+      return data.error ? ` with error ${data.status}` : "";
+   }
+   
    _innerListener(data) {
       if (data.id.valueOf() == this.getId()) {
          switch (data.eventName) {
             case bt.events.connectionState.CONNECTED:
+               console.log(`BluetoothDevice connected (${this.
+                  getId()})${this._withError(data)}.`);
+               
                this._connected = !data.error;
+               
+               if (
+                  this.isConnected()
+                  && this._connectionOptions.autoDiscoverServices)
+               {
+                  this.discoverServices(this._connectionOptions.
+                     autoDiscoverServicesUseCache).catch(this._failureHandler);
+               }
+               
                break;
             
             case bt.events.connectionState.DISCONNECTED:
+               console.log(`BluetoothDevice disconnected (${this.
+                  getId()})${this._withError(data)}.`);
+               
                this._connected = false;
                this._servicesDiscovered = false;
                
                this.flushRequests();
                
+               if (this.isShutdownRequested()) {
+                  this._removeInnerListeners();
+                  
+                  if (Platform.OS == "android") {
+                     this._closeGatt().catch(this._failureHandler);
+                  }
+               }
+               
                break;
             
             case bt.events.gatt.SERVICES_DISCOVERED:
+               console.log(`BluetoothDevice services discovered (${this.
+                  getId()})${this._withError(data)}.`);
+               
                this._servicesDiscovered = !data.error;
+               
                break;
          }
          
@@ -322,19 +412,54 @@ export default class BluetoothDevice {
             (data.eventName == bt.events.gatt.CHARACTERISTIC_WRITTEN
             || data.eventName == bt.events.gatt.DESCRIPTOR_WRITTEN) ? false :
             
-            undefined;
+            null;
          
-         if (read != undefined) {
+         if (read != null) {
             this._safeReadWrite(read).catch(this._failureHandler);
-            
-            if (!read && this._writeCallbacksToReceive) {
-               this._writeCallbacksToReceive--;
-               
-               if (!this._writeCallbacksToReceive) {
-                  this.closeGatt().catch(this._failureHandler);
-               }
-            }
          }
+      }
+   }
+   
+   async _disconnect() {
+      console.log(`BluetoothDevice.disconnect('${this.getId()}').`);
+      
+      await bt.disconnect(this.getId());
+   }
+   
+   async _closeGatt() {
+      console.log(`BluetoothDevice.closeGatt() for '${this.getId()}'.`);
+      
+      await bt.closeGatt(this.getId());
+   }
+   
+   async _setCharacteristicNotification(
+      serviceUuid,
+      characteristicUuid,
+      enable,
+      options)
+   {
+      await bt.setCharacteristicNotification(this.getId(),
+         serviceUuid, characteristicUuid, enable, options);
+      
+      if (Platform.OS == "android") {
+         await this._safeReadWrite(false, [
+            serviceUuid,
+            characteristicUuid,
+            "00002902-0000-1000-8000-00805f9b34fb",
+            {value: [+enable, 0]}
+         ]);
+      }
+   }
+   
+   _throwIfShutdownRequested() {
+      if (this.isShutdownRequested()) {
+         throw new Error(`Connection shutdown was requested for '${this.getId()}'`);
+      }
+   }
+   
+   _removeInnerListeners() {
+      for (let eventType of Object.keys(this._listeners)) {
+         this._listeners[eventType].innerListener.remove();
       }
    }
 }

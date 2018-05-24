@@ -377,6 +377,17 @@ class Module extends ReactContextBaseJavaModule {
    }
    
    @ReactMethod
+   public void connect(String address, Promise promise) {
+      try {
+         promise.resolve(getGatt(address).connect());
+         
+         Log.d(TAG, String.format("connect('%s')", address));
+      } catch (IllegalStateException e) {
+         promise.reject("", e.getMessage());
+      }
+   }
+   
+   @ReactMethod
    public void discoverServices(String address, Boolean useCache, Promise promise) {
       try {
          final BluetoothGatt gatt = getGatt(address);
@@ -475,6 +486,19 @@ class Module extends ReactContextBaseJavaModule {
    }
    
    @ReactMethod
+   public void disconnect(String address, Promise promise) {
+      try {
+         getGatt(address).disconnect();
+         
+         Log.d(TAG, String.format("disconnect('%s')", address));
+         
+         promise.resolve(null);
+      } catch (IllegalStateException e) {
+         promise.reject("", e.getMessage());
+      }
+   }
+   
+   @ReactMethod
    public void closeGatt(String address, Promise promise) {
       try {
          final BluetoothGatt gatt = getGatt(address);
@@ -484,7 +508,6 @@ class Module extends ReactContextBaseJavaModule {
                "gatts.remove('%s') == null", gatt.getDevice().getAddress()));
          }
          
-         gatt.disconnect();
          gatt.close();
          
          Log.d(TAG, String.format("closeGatt('%s')", address));
