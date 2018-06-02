@@ -104,7 +104,7 @@ export default class Bluetooth {
          }
          
          if (!this._scanResults.find(scanResult => scanResult.device.
-            id == result.id) || this._scanOptions.allowDuplicates)
+            id == result.device.id) || this._scanOptions.allowDuplicates)
          {
             this._scanResults.push(result);
          }
