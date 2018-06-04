@@ -1,61 +1,21 @@
 import {
    NativeModules,
-   NativeEventEmitter,
    Platform
 } from "react-native";
+import { EventHandlingHelper } from "react-native-common-utils";
 
 const bt = NativeModules.SimpleBluetoothManager;
-const emitter = new NativeEventEmitter(bt);
 
 export default class BluetoothDevice {
    constructor(id) {
       this._id = id || "";
-      this._listeners = {};
       
-      for (let group of [ "connectionState", "gatt" ]) {
-         for (let eventType of Object.keys(bt.events[group])) {
-            this._listeners[eventType] = {
-               listeners: [],
-               innerListener: emitter.addListener(
-                  eventType, this._innerListener.bind(this))
-            };
-            
-            const indices = [0];
-            let index = -1;
-            
-            while ((index = eventType.indexOf("_", index + 1)) != -1) {
-               indices.push(index);
-            }
-            
-            let camelCased = Array.from(eventType.toLowerCase());
-            
-            for (let index of indices) {
-               if (index) {
-                  camelCased.splice(index, 1);
-               }
-               
-               camelCased[index] = camelCased[index].toUpperCase();
-            }
-            
-            camelCased = camelCased.join("");
-            
-            this[`addOn${camelCased}Listener`] = function(listener) {
-               this._listeners[eventType].listeners.push(listener);
-               
-               return this;
-            };
-            
-            this[`removeOn${camelCased}Listener`] = function(listener) {
-               const index = this._listeners[eventType].listeners.indexOf(listener);
-               
-               if (index != -1) {
-                  this._listeners[eventType].listeners.splice(index, 1);
-               }
-               
-               return this;
-            }
-         }
-      }
+      this._eventHandlingHelper = new EventHandlingHelper({
+         object: this,
+         nativeModule: bt,
+         eventGroups: [ "connectionState", "gatt" ],
+         innerListener: this._innerListener
+      });
       
       this._requests = {
          read: [],
@@ -157,6 +117,10 @@ export default class BluetoothDevice {
    async writeCharacteristic(serviceUuid, characteristicUuid, dataAndOptions) {
       this._throwIfShutdownRequested();
       
+      console.log(`BluetoothDevice.writeCharacteristic('${this.getId()}', '${
+         serviceUuid}', '${characteristicUuid}', ${JSON.stringify(
+            dataAndOptions)}).`);
+      
       if (!dataAndOptions
          || (dataAndOptions.chunkSize == undefined)
          || !Array.isArray(dataAndOptions.value)
@@ -252,12 +216,10 @@ export default class BluetoothDevice {
       
       this._shutdownRequested = true;
       
-      for (let eventType of Object.keys(this._listeners)) {
-         this._listeners[eventType].listeners.length = 0;
-      }
+      this._eventHandlingHelper.removeListeners();
       
       if (!this.isConnected()) {
-         this._removeInnerListeners();
+         this._eventHandlingHelper.removeInnerListeners();
          
          try {
             if (
@@ -298,7 +260,7 @@ export default class BluetoothDevice {
             } else if (this._connectionOptions.invokeBTGattDisconnect) {
                await this._disconnect();
             } else {
-               this._removeInnerListeners();
+               this._eventHandlingHelper.removeInnerListeners();
                await this._closeGatt();
             }
          } catch (error) {
@@ -383,7 +345,7 @@ export default class BluetoothDevice {
                this.flushRequests();
                
                if (this.isShutdownRequested()) {
-                  this._removeInnerListeners();
+                  this._eventHandlingHelper.removeInnerListeners();
                   
                   if (Platform.OS == "android") {
                      this._closeGatt().catch(this._failureHandler);
@@ -401,9 +363,7 @@ export default class BluetoothDevice {
                break;
          }
          
-         for (let listener of this._listeners[data.eventName].listeners) {
-            listener(data);
-         }
+         this._eventHandlingHelper.invokeListeners(data);
          
          const read =
             (data.eventName == bt.events.gatt.CHARACTERISTIC_READ
@@ -454,12 +414,6 @@ export default class BluetoothDevice {
    _throwIfShutdownRequested() {
       if (this.isShutdownRequested()) {
          throw new Error(`Connection shutdown was requested for '${this.getId()}'`);
-      }
-   }
-   
-   _removeInnerListeners() {
-      for (let eventType of Object.keys(this._listeners)) {
-         this._listeners[eventType].innerListener.remove();
       }
    }
 }
