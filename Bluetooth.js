@@ -37,6 +37,10 @@ export default class Bluetooth {
       return Platform.OS == "android" ? false : bt.isKnownDeviceId(id);
    }
    
+   isScanStarted() {
+      return this._scanStarted;
+   }
+   
    async startScan(options = {}, millis) {
       this._scanResults = [];
       this._scanOptions = { ...options };
@@ -51,9 +55,9 @@ export default class Bluetooth {
       
       millis = Math.max(millis, this._scanOptions.minMillis);
       
-      console.log(`Bluetooth.startScan(${JSON.stringify(this._scanOptions)}).`);
-      
       await bt.startScan(this._scanOptions);
+      
+      this._scanStarted = true;
       
       const promises = [];
       let timeoutFired = false;
@@ -88,7 +92,7 @@ export default class Bluetooth {
    }
    
    async stopScan() {
-      console.log("Bluetooth.stopScan().");
+      this._scanStarted = false;
       
       await bt.stopScan();
    }

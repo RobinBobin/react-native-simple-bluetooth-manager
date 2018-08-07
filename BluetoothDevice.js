@@ -82,8 +82,6 @@ export default class BluetoothDevice {
    async connect() {
       this._throwIfShutdownRequested();
       
-      console.log(`BluetoothDevice.connect('${this.getId()}').`);
-      
       return await bt.connect(this.getId());
    }
    
@@ -102,9 +100,6 @@ export default class BluetoothDevice {
    async discoverServices(useCache = true) {
       this._throwIfShutdownRequested();
       
-      console.log(`BluetoothDevice.discoverServices(${
-         useCache}) for '${this.getId()}'.`);
-      
       await bt.discoverServices(this.getId(), useCache);
    }
    
@@ -116,10 +111,6 @@ export default class BluetoothDevice {
    
    async writeCharacteristic(serviceUuid, characteristicUuid, dataAndOptions) {
       this._throwIfShutdownRequested();
-      
-      console.log(`BluetoothDevice.writeCharacteristic('${this.getId()}', '${
-         serviceUuid}', '${characteristicUuid}', ${JSON.stringify(
-            dataAndOptions)}).`);
       
       if (!dataAndOptions
          || (dataAndOptions.chunkSize == undefined)
@@ -381,14 +372,10 @@ export default class BluetoothDevice {
    }
    
    async _disconnect() {
-      console.log(`BluetoothDevice.disconnect('${this.getId()}').`);
-      
       await bt.disconnect(this.getId());
    }
    
    async _closeGatt() {
-      console.log(`BluetoothDevice.closeGatt() for '${this.getId()}'.`);
-      
       await bt.closeGatt(this.getId());
    }
    
