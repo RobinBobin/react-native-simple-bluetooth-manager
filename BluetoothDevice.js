@@ -56,6 +56,12 @@ export default class BluetoothDevice {
       this._failureHandler = failureHandler;
    }
    
+   setReadWriteTimeoutHandler(readWriteTimeoutHandler) {
+      this._readWriteTimeoutHandler = readWriteTimeoutHandler;
+      
+      return this;
+   }
+   
    isValid() {
       return bt.isValid(this.getId());
    }
@@ -109,15 +115,26 @@ export default class BluetoothDevice {
       await this._safeReadWrite(true, arguments);
    }
    
-   async writeCharacteristic(serviceUuid, characteristicUuid, dataAndOptions) {
+   async writeCharacteristic(
+      serviceUuid,
+      characteristicUuid,
+      dataAndOptions,
+      timeout)
+   {
       this._throwIfShutdownRequested();
+      
+      const args = [
+         serviceUuid,
+         characteristicUuid,
+         dataAndOptions
+      ];
       
       if (!dataAndOptions
          || (dataAndOptions.chunkSize == undefined)
          || !Array.isArray(dataAndOptions.value)
          || dataAndOptions.value.length <= dataAndOptions.chunkSize)
       {
-         await this._safeReadWrite(false, arguments);
+         await this._safeReadWrite(false, args, timeout);
       } else {
          if (dataAndOptions.chunkSize <= 0) {
             throw new Error(`dataAndOptions.chunkSize (${
@@ -125,12 +142,9 @@ export default class BluetoothDevice {
          }
          
          for (let i = 0; i < dataAndOptions.value.length;) {
-            await this._safeReadWrite(false, [
-               serviceUuid,
-               characteristicUuid,
-               Object.assign({}, dataAndOptions, {value: dataAndOptions.
-                  value.slice(i, i += dataAndOptions.chunkSize)})
-            ]);
+            args[2] = Object.assign({}, dataAndOptions, {value: dataAndOptions.value.slice(i, i += dataAndOptions.chunkSize)});
+            
+            await this._safeReadWrite(false, args, timeout);
          }
       }
    }
@@ -260,7 +274,7 @@ export default class BluetoothDevice {
       }
    }
    
-   async _safeReadWrite(read, params = []) {
+   async _safeReadWrite(read, params = [], timeout) {
       const operation = read ? "read" : "write";
       const requests = this._requests[operation];
       
@@ -269,11 +283,18 @@ export default class BluetoothDevice {
       if (!params.length) {
          requests.shift();
          request = requests[0];
+         
+         if (this._safeReadWriteTimeoutId) {
+            clearTimeout(this._safeReadWriteTimeoutId);
+            
+            this._safeReadWriteTimeoutId = 0;
+         }
       } else {
          request = {
             serviceUuid: params[0],
             characteristicUuid: params[1],
-            obj: params[params.length - 1]
+            obj: params[params.length - 1],
+            timeout
          };
          
          if (params.length == 4) {
@@ -298,6 +319,14 @@ export default class BluetoothDevice {
          
          await bt[operation + (descrOp ? "Descriptor" :
             "Characteristic")].apply(null, ar);
+         
+         if (request.timeout > 0) {
+            this._safeReadWriteTimeoutId = setTimeout(() => {
+               if (this._readWriteTimeoutHandler) {
+                  this._readWriteTimeoutHandler();
+               }
+            }, request.timeout);
+         }
       }
       
       params.length && requests.push(request);
