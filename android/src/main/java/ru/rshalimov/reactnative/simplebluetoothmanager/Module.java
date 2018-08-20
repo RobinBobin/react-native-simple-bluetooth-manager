@@ -417,7 +417,22 @@ class Module extends ReactContextBaseJavaModule {
       ReadableMap options,
       Promise promise)
    {
-      promise.reject("", "Not implemented yet");
+      try {
+         final BluetoothGatt gatt = getGatt(address);
+         
+         final BluetoothGattCharacteristic ch = getCharacteristic(
+            gatt, serviceUuid, characteristicUuid);
+         
+         if (!gatt.readCharacteristic(ch)) {
+            throw new IllegalStateException("readCharacteristic failed.");
+         }
+         
+         addRemoveReadOptions(true, options, address, serviceUuid, characteristicUuid);
+         
+         promise.resolve(null);
+      } catch (IllegalStateException | IllegalArgumentException e) {
+         promise.reject("", e.getMessage());
+      }
    }
    
    @ReactMethod
@@ -455,14 +470,7 @@ class Module extends ReactContextBaseJavaModule {
                   logString));
          }
          
-         final String readOptionsKey = getReadOptionsKey(
-            address, serviceUuid, characteristicUuid);
-         
-         if (enable && options != null) {
-            readOptions.put(readOptionsKey, options.toHashMap());
-         } else {
-            readOptions.remove(readOptionsKey);
-         }
+         addRemoveReadOptions(enable, options, address, serviceUuid, characteristicUuid);
          
          Log.d(TAG, String.format("setCharacteristicNotification%s", logString));
          
@@ -773,12 +781,21 @@ class Module extends ReactContextBaseJavaModule {
       }
       
       if (changed || read) {
-         final Map <String, Object> options = readOptions.get(getReadOptionsKey(
-            address, serviceUuid, characteristicUuid, descriptorUuid));
+         final String readOptionsKey = getReadOptionsKey(address, serviceUuid, characteristicUuid, descriptorUuid);
          
-         params.putArray("value", Utils.writableArrayFrom(isCh ? ch.getValue() :
-            descr.getValue(), options == null || !options.containsKey(
-               "valueUnsigned") ? true : !(Boolean)options.get("valueUnsigned")));
+         final Map <String, Object> options = readOptions.get(readOptionsKey);
+         
+         if (options != null && (Boolean)options.get("asString")) {
+            final Integer offset = (Integer)options.get("offset");
+            
+            params.putString("value", ch.getStringValue(offset == null ? 0 : offset));
+         } else {
+            params.putArray("value", Utils.writableArrayFrom(isCh ? ch.getValue() : descr.getValue(), options == null || !options.containsKey("valueUnsigned") ? true : !(Boolean)options.get("valueUnsigned")));
+         }
+         
+         if (read) {
+            readOptions.remove(readOptionsKey);
+         }
       }
       
       emit(isCh ? (changed ? CHARACTERISTIC_CHANGED : (read ? CHARACTERISTIC_READ :
@@ -840,6 +857,20 @@ class Module extends ReactContextBaseJavaModule {
          }
       }
       
-      return sb.toString();
+      return sb.toString().toLowerCase();
+   }
+   
+   private void addRemoveReadOptions(
+      Boolean enable,
+      ReadableMap options,
+      String ... parts)
+   {
+      final String readOptionsKey = getReadOptionsKey(parts);
+      
+      if (enable && options != null) {
+         readOptions.put(readOptionsKey, options.toHashMap());
+      } else {
+         readOptions.remove(readOptionsKey);
+      }
    }
 }
