@@ -253,7 +253,7 @@ enum Errors : Error {
    }
    
    func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
-      onReadWrittenChanged(peripheral, characteristic, true, error);
+      onReadWrittenChanged(peripheral, characteristic, characteristic.isNotifying ? nil : true, error);
    }
    
    func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor descriptor: CBDescriptor, error: Error?) {
@@ -379,7 +379,7 @@ enum Errors : Error {
    func onReadWrittenChanged(
       _ peripheral: CBPeripheral,
       _ characteristicOrDescriptor: CBAttribute,
-      _ read: Bool,
+      _ read: Bool?,
       _ error: Error?)
    {
       let isCh = characteristicOrDescriptor is CBCharacteristic;
@@ -396,16 +396,31 @@ enum Errors : Error {
       params["characteristicUuid"] = characteristicUuid;
       params["descriptorUuid"] = descriptorUuid;
       
-      // TODO read descriptor
-      if read && isCh {
-         let options = readOptions[getReadOptionsKey(peripheral.identifier.uuidString, serviceUuid, characteristicUuid, descriptorUuid)];
+      if read == nil || read! {
+         let readOptionsKey = getReadOptionsKey(peripheral.identifier.uuidString, serviceUuid, characteristicUuid, descriptorUuid);
+         let options = readOptions[readOptionsKey];
          
-         let value = [UInt8](characteristic.value!);
+         if descriptor == nil {
+            if options == nil {
+               params["value"] = [UInt8](characteristic.value!).map {Int8(bitPattern: $0)};
+            } else if options!.keys.contains("asString") {
+               params["value"] = String(data: characteristic.value!, encoding: .utf8);
+            } else {
+               let value = [UInt8](characteristic.value!);
+               let valueUnsigned = options!["valueUnsigned"];
+               
+               params["value"] = (valueUnsigned == nil || !(valueUnsigned as! Bool)) ? value.map {Int8(bitPattern: $0)} : value;
+            }
+         } else {
+            
+         }
          
-         params["value"] = options != nil && options!["valueUnsigned"] as! Bool ? value : value.map {Int8(bitPattern: $0)};
+         if read != nil {
+            readOptions[readOptionsKey] = nil;
+         }
       }
       
-      emit(isCh ? (read ? (characteristic.isNotifying ? CHARACTERISTIC_CHANGED : CHARACTERISTIC_READ) : CHARACTERISTIC_WRITTEN) : (read ? DESCRIPTOR_READ : DESCRIPTOR_WRITTEN), params);
+      emit(isCh ? (read == nil ? CHARACTERISTIC_CHANGED : (read! ? CHARACTERISTIC_READ : CHARACTERISTIC_WRITTEN)) : (read! ? DESCRIPTOR_READ : DESCRIPTOR_WRITTEN), params);
    }
    
    @objc override func constantsToExport() -> [AnyHashable: Any] {
@@ -553,7 +568,17 @@ enum Errors : Error {
       resolver: RCTPromiseResolveBlock,
       rejecter: RCTPromiseRejectBlock)
    {
-      rejecter("", "can't read yet", nil);
+      do {
+         let peripheral = try getPeripheralData(peripheralUuid).peripheral;
+         
+         peripheral.readValue(for: try getCharacteristic(peripheral, serviceUuid, characteristicUuid))
+         
+         readOptions[getReadOptionsKey(peripheralUuid, serviceUuid, characteristicUuid)] = options;
+         
+         resolver(nil);
+      } catch {
+         rejecter("", String(describing: error), error);
+      }
    }
    
    @objc func writeCharacteristic(
