@@ -450,7 +450,7 @@ enum Errors : Error {
             SCAN_RESULT
          ]
          ].forEach { category in events[category.key] = category.value.reduce([:], {
-            result, element in var result = result result![element] = element return result
+            result, element in var result = result; result![element] = element; return result
          }) }
       
       return [
