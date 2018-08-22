@@ -105,6 +105,10 @@ enum Errors : Error {
       manager = CBCentralManager(delegate: self, queue: nil);
    }
    
+   override static func requiresMainQueueSetup() -> Bool {
+      return true
+   }
+   
    override func supportedEvents() -> [String] {
       return [
          CONNECTED,
@@ -165,7 +169,7 @@ enum Errors : Error {
                "rssi": rssi,
                "scanRecord": [
                   "bytes": (advertisementDataUnsigned ? ubytes : ubytes.map {Int8(bitPattern: $0)}) as Any,
-                  "name": localName!
+                  "name": localName ?? ""
                ]
                ]]]);
       }
