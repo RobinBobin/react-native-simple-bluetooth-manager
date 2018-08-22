@@ -204,6 +204,17 @@ export default class BluetoothDevice {
       await this._safeReadWrite(false, arguments);
    }
    
+   async readSerialNumber() {
+      const isAndroid = Platform.OS == "android";
+      
+      await this.readCharacteristic(
+         isAndroid ? "0000180A-0000-1000-8000-00805F9B34FB" : "180A",
+         isAndroid ? "00002A25-0000-1000-8000-00805F9B34FB" : "2A25", {
+            asString: true
+         }
+      );
+   }
+   
    async disconnect() {
       this._throwIfShutdownRequested();
       
