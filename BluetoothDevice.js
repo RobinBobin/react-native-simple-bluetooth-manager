@@ -235,6 +235,8 @@ export default class BluetoothDevice {
       this._eventHandlingHelper.removeListeners();
       
       if (!this.isConnected()) {
+         console.log(`Shutting down a disconnected BluetoothDevice connection with '${this.getId()}'.`);
+         
          this._eventHandlingHelper.removeInnerListeners();
          
          try {
@@ -266,9 +268,7 @@ export default class BluetoothDevice {
          
          await new Promise(resolve => setTimeout(resolve, timeout));
          
-         console.log(`Shutting down BluetoothDevice connection with '${this.
-            getId()}'. R/W requests pending: ${this._requests.read.length + this.
-               _requests.write.length}.`);
+         console.log(`Shutting down a BluetoothDevice connection with '${this.getId()}'. R/W requests pending: ${this._requests.read.length + this._requests.write.length}.`);
          
          try {
             if (Platform.OS == "ios") {
