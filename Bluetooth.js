@@ -98,7 +98,7 @@ export default class Bluetooth {
    }
    
    getScanResults() {
-      return Array.from(this._scanResults);
+      return [...this._scanResults];
    }
    
    _onScanResult(data) {
