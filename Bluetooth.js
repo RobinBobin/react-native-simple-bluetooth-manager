@@ -3,12 +3,10 @@ import {
    NativeEventEmitter,
    Platform
 } from "react-native";
-import { autobind } from "core-decorators"
 
 const bt = NativeModules.SimpleBluetoothManager;
 const emitter = new NativeEventEmitter(bt);
 
-@autobind
 export default class Bluetooth {
    static scanMode = bt.scanMode;
    
@@ -17,10 +15,10 @@ export default class Bluetooth {
       
       [[
          bt.events.leScanCallback.SCAN_RESULT,
-         onScanResultListener || this._onScanResult
+         onScanResultListener || this._onScanResult.bind(this)
       ], [
          bt.events.leScanCallback.SCAN_FAILED,
-         onScanFailedListener || this._onScanFailed
+         onScanFailedListener || this._onScanFailed.bind(this)
       ]].forEach(data => this._listeners.push(
          emitter.addListener(data[0], data[1])));
    }
