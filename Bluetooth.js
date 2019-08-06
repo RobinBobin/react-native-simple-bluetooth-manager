@@ -21,6 +21,8 @@ export default class Bluetooth {
          onScanFailedListener || this._onScanFailed.bind(this)
       ]].forEach(data => this._listeners.push(
          emitter.addListener(data[0], data[1])));
+      
+      this._scanResults = [];
    }
    
    removeAllListeners() {
