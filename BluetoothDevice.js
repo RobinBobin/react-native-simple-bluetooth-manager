@@ -109,7 +109,7 @@ export default class BluetoothDevice {
       await bt.discoverServices(this.getId(), useCache);
    }
    
-   async readCharacteristic(serviceUuid, characteristicUuid, options) {
+   async readCharacteristic(/*serviceUuid, characteristicUuid, options*/) {
       this._throwIfShutdownRequested();
       
       await this._safeReadWrite(true, arguments);
@@ -129,8 +129,7 @@ export default class BluetoothDevice {
          dataAndOptions
       ];
       
-      if (!dataAndOptions
-         || (dataAndOptions.chunkSize == undefined)
+      if (dataAndOptions.chunkSize == undefined
          || !Array.isArray(dataAndOptions.value)
          || dataAndOptions.value.length <= dataAndOptions.chunkSize)
       {
@@ -141,10 +140,12 @@ export default class BluetoothDevice {
                dataAndOptions.chunkSize}) can't be <= 0`);
          }
          
-         for (let i = 0; i < dataAndOptions.value.length;) {
-            args[2] = Object.assign({}, dataAndOptions, {value: dataAndOptions.value.slice(i, i += dataAndOptions.chunkSize)});
+         const value = dataAndOptions.value;
+         
+         while (value.length) {
+            args[2].value = value.splice(0, dataAndOptions.chunkSize);
             
-            await this._safeReadWrite(false, args, timeout);
+            await this._safeReadWrite(false, args, timeout, !value.length);
          }
       }
    }
@@ -182,22 +183,22 @@ export default class BluetoothDevice {
       }
    }
    
-   async readDescriptor(
+   async readDescriptor(/*
       serviceUuid,
       characteristicUuid,
       descriptorUuid,
-      options)
+      options*/)
    {
       this._throwIfShutdownRequested();
       
       await this._safeReadWrite(true, arguments);
    }
    
-   async writeDescriptor(
+   async writeDescriptor(/*
       serviceUuid,
       characteristicUuid,
       descriptorUuid,
-      dataAndOptions)
+      dataAndOptions*/)
    {
       this._throwIfShutdownRequested();
       
@@ -285,14 +286,15 @@ export default class BluetoothDevice {
       }
    }
    
-   async _safeReadWrite(read, params = [], timeout) {
+   async _safeReadWrite(read, params = [], timeout, lastChunk = true) {
       const operation = read ? "read" : "write";
       const requests = this._requests[operation];
       
       let request;
+      let rwCompleted;
       
       if (!params.length) {
-         requests.shift();
+         rwCompleted = requests.shift().lastChunk;
          request = requests[0];
          
          if (this._safeReadWriteTimeoutId) {
@@ -305,7 +307,8 @@ export default class BluetoothDevice {
             serviceUuid: params[0],
             characteristicUuid: params[1],
             obj: params[params.length - 1],
-            timeout
+            timeout,
+            lastChunk
          };
          
          if (params.length == 4) {
@@ -341,34 +344,38 @@ export default class BluetoothDevice {
       }
       
       params.length && requests.push(request);
+      
+      return rwCompleted;
    }
    
    _withError(data) {
       return data.error ? ` with error ${data.status}` : "";
    }
    
-   _innerListener(data) {
-      if (data.id.valueOf() == this.getId()) {
+   async _innerListener(data) {
+      if (data.id.valueOf() != this.getId()) {
+         return;
+      }
+      
+      let rwCompleted;
+      
+      try {
          switch (data.eventName) {
             case bt.events.connectionState.CONNECTED:
-               console.log(`BluetoothDevice connected (${this.
-                  getId()})${this._withError(data)}.`);
+               console.log(`BluetoothDevice connected (${this.getId()})${this._withError(data)}.`);
                
                this._connected = !data.error;
                
-               if (
-                  this.isConnected()
-                  && this._connectionOptions.autoDiscoverServices)
+               if (this.isConnected() && this._connectionOptions.autoDiscoverServices)
                {
-                  this.discoverServices(this._connectionOptions.
-                     autoDiscoverServicesUseCache).catch(this._failureHandler);
+                  await this.discoverServices(this._connectionOptions.
+                     autoDiscoverServicesUseCache);
                }
                
                break;
             
             case bt.events.connectionState.DISCONNECTED:
-               console.log(`BluetoothDevice disconnected (${this.
-                  getId()})${this._withError(data)}.`);
+               console.log(`BluetoothDevice disconnected (${this.getId()})${this._withError(data)}.`);
                
                this._connected = false;
                this._servicesDiscovered = false;
@@ -379,36 +386,40 @@ export default class BluetoothDevice {
                   this._eventHandlingHelper.removeInnerListeners();
                   
                   if (Platform.OS == "android") {
-                     this._closeGatt().catch(this._failureHandler);
+                     await this._closeGatt();
                   }
                }
                
                break;
             
             case bt.events.gatt.SERVICES_DISCOVERED:
-               console.log(`BluetoothDevice services discovered (${this.
-                  getId()})${this._withError(data)}.`);
+               console.log(`BluetoothDevice services discovered (${this.getId()})${this._withError(data)}.`);
                
                this._servicesDiscovered = !data.error;
                
                break;
-         }
-         
-         this._eventHandlingHelper.invokeListeners(data);
-         
-         const read =
-            (data.eventName == bt.events.gatt.CHARACTERISTIC_READ
-            || data.eventName == bt.events.gatt.DESCRIPTOR_READ) ? true :
             
-            (data.eventName == bt.events.gatt.CHARACTERISTIC_WRITTEN
-            || data.eventName == bt.events.gatt.DESCRIPTOR_WRITTEN) ? false :
+            case bt.events.gatt.CHARACTERISTIC_READ:
+            case bt.events.gatt.DESCRIPTOR_READ:
+               rwCompleted = await this._safeReadWrite(true);
+               break;
             
-            null;
-         
-         if (read != null) {
-            this._safeReadWrite(read).catch(this._failureHandler);
+            case bt.events.gatt.CHARACTERISTIC_WRITTEN:
+            case bt.events.gatt.DESCRIPTOR_WRITTEN:
+               rwCompleted = await this._safeReadWrite(false);
+               break;
          }
+      } catch (e) {
+         this._failureHandler(e);
       }
+      
+      const args = [data];
+      
+      if (rwCompleted != undefined) {
+         args.push(rwCompleted);
+      }
+      
+      this._eventHandlingHelper.invokeListeners(...args);
    }
    
    async _disconnect() {
