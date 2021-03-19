@@ -793,7 +793,7 @@ class Module extends ReactContextBaseJavaModule {
             params.putArray("value", Utils.writableArrayFrom(isCh ? ch.getValue() : descr.getValue(), options == null || !options.containsKey("valueUnsigned") ? true : !(Boolean)options.get("valueUnsigned")));
          }
          
-         if (read) {
+         if (!changed && read) {
             readOptions.remove(readOptionsKey);
          }
       }

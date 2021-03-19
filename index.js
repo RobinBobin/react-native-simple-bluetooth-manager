@@ -1,9 +1,13 @@
-import Bluetooth from "./Bluetooth";
-import BluetoothDevice from "./BluetoothDevice";
-import BluetoothDeviceQueue from "./BluetoothDeviceQueue";
+import Bluetooth from "./js/Bluetooth";
+import BluetoothDevice from "./js/BluetoothDevice";
+import BluetoothDeviceQueue from "./js/BluetoothDeviceQueue";
+import AutoconnectableDevice from "./js/proxies/AutoconnectableDevice";
+import BluetoothDeviceProxy from "./js/proxies/BluetoothDeviceProxy";
 
 export {
-   Bluetooth,
-   BluetoothDevice,
-   BluetoothDeviceQueue
+  AutoconnectableDevice,
+  Bluetooth,
+  BluetoothDevice,
+  BluetoothDeviceProxy,
+  BluetoothDeviceQueue
 };
