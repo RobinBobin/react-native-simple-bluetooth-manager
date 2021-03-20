@@ -1,31 +1,45 @@
-import { ApplicationSession } from "react-native-common-utils";
+import { ApplicationSession2 } from "react-native-common-utils";
 
-export default class BluetoothContextApplicationSession extends ApplicationSession {
-  _start() {
+export default class BluetoothContextApplicationSession extends ApplicationSession2 {
+  async _switchToActive() {
+    let handlerName;
+    
     for (let selectedDevice of this._context.selectedDevices) {
-      if (!this._isShutdownRequested()) {
-        selectedDevice.openConnection().catch(console.log);
+      handlerName = this._isSwitchRequested("background");
+      
+      if (handlerName) {
+        break;
       }
+      
+      try {
+        await selectedDevice.openConnection();
+      } catch (error) {
+        console.log(error);
+      }
+    }
+    
+    if (handlerName) {
+      this[handlerName]();
+    } else {
+      this._completeSwitch();
     }
   }
   
-  async _requestShutdown() {
-    super._requestShutdown();
-    
-    let counter = this._context.selectedDevices.length;
-    
+  async _switchToBackground() {
     for (let selectedDevice of this._context.selectedDevices) {
-      selectedDevice.device.shutdown()
-        .catch(console.log)
-        .then(() => --counter);
+      try {
+        await selectedDevice.device.shutdown();
+      } catch (error) {
+        console.log(error);
+      }
     }
     
-    while (counter) {
-      await new Promise(resolve => setTimeout(resolve, 100));
-    }
+    const handlerName = this._isSwitchRequested("active");
     
-    this._setShutdown();
+    if (handlerName) {
+      this[handlerName]();
+    } else {
+      this._completeSwitch()
+    }
   }
 };
-
-BluetoothContextApplicationSession._setSessionType(BluetoothContextApplicationSession, true);
