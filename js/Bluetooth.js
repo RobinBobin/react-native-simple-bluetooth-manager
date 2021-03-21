@@ -105,20 +105,30 @@ export default class Bluetooth {
     if (promises.length) {
       await Promise.race(promises);
       
-      if (this.__scanStarted) {
-        await this.stopScan();
+      if (await this.stopScan()) {
+        return this.getDiscoveredDevices();
       }
     }
   }
   
-  async stopScan() {
+  async stopScan(throwIfStopped) {
+    let result = true;
+    
     if (!this.__scanStarted) {
-      throw new Error("Scan already stopped");
+      if (throwIfStopped) {
+        throw new Error("Scan already stopped");
+      }
+      
+      result = false;
     }
     
-    await bt.stopScan();
+    if (result) {
+      await bt.stopScan();
+      
+      this.__scanStarted = false;
+    }
     
-    this.__scanStarted = false;
+    return result;
   }
   
   __onScanFailed(data) {
