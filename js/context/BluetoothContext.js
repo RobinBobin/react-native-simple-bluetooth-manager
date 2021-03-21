@@ -17,9 +17,13 @@ export default class BluetoothContext {
   }
   
   addSelectedDevice(deviceId, createDeviceObject) {
-    this.selectedDevices.push(new BluetoothContextDeviceProxy(deviceId, createDeviceObject ?? this.__createDeviceObject));
+    const device = new BluetoothContextDeviceProxy(deviceId, createDeviceObject ?? this.__createDeviceObject);
+    
+    this.selectedDevices.push(device);
     
     this.selectedDevices = [...this.selectedDevices];
+    
+    return device;
   }
   
   removeSelectedDevice(index) {
