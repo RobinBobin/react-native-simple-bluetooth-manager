@@ -1,4 +1,8 @@
-import { makeAutoObservable } from "mobx";
+import {
+  action,
+  observable,
+  makeObservable
+} from "mobx";
 import BluetoothDeviceProxy from "../proxies/BluetoothDeviceProxy";
 
 const DISCONNECTED = 0;
@@ -11,15 +15,15 @@ export default class BluetoothContextDeviceProxy {
     this.__createDeviceObject = createDeviceObject;
     this.__state = DISCONNECTED;
     
+    this.__onConnected = this.__onConnected.bind(this);
+    this.__onDisconnected = this.__onDisconnected.bind(this);
+    this.__onServicesDiscovered = this.__onServicesDiscovered.bind(this);
+    
     this.__createProxy(deviceId);
     
-    makeAutoObservable(this, {
-      device: false,
-      isConnecting: false,
-      raw: false,
-      __createDeviceObject: false,
-      __createProxy: false,
-      __proxy: false
+    makeObservable(this, {
+      __setState: action,
+      __state: observable
     });
   }
   
@@ -38,7 +42,7 @@ export default class BluetoothContextDeviceProxy {
     
     const result = await this.__proxy.device.openConnection();
     
-    this.__state = CONNECTING;
+    this.__setState(CONNECTING);
     
     return result;
   }
@@ -57,20 +61,24 @@ export default class BluetoothContextDeviceProxy {
     this.__proxy = object instanceof BluetoothDeviceProxy ? object : new BluetoothDeviceProxy(object);
     
     this.__proxy.device
-      .addOnConnectedListener(this.__onConnected.bind(this))
-      .addOnDisconnectedListener(this.__onDisconnected.bind(this))
-      .addOnServicesDiscoveredListener(this.__onServicesDiscovered.bind(this));
+      .addOnConnectedListener(this.__onConnected)
+      .addOnDisconnectedListener(this.__onDisconnected)
+      .addOnServicesDiscoveredListener(this.__onServicesDiscovered);
   }
   
   __onConnected() {
-    this.__state = CONNECTED;
+    this.__setState(CONNECTED);
   }
   
   __onDisconnected() {
-    this.__state = DISCONNECTED;
+    this.__setState(DISCONNECTED);
   }
   
   __onServicesDiscovered() {
-    this.__state = SERVICES_DISCOVERED;
+    this.__setState(SERVICES_DISCOVERED);
+  }
+  
+  __setState(state) {
+    this.__state = state;
   }
 };
