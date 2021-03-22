@@ -27,9 +27,11 @@ export default class BluetoothContext {
   }
   
   removeSelectedDevice(index) {
-    this.selectedDevices.splice(index, 1);
+    const [device] = this.selectedDevices.splice(index, 1);
     
     this.selectedDevices = [...this.selectedDevices];
+    
+    return device;
   }
   
   setDiscoveredDevices(discoveredDevices) {
