@@ -47,6 +47,10 @@ export default class BluetoothContextDeviceProxy {
     return result;
   }
   
+  get proxy() {
+    return this.__proxy;
+  }
+  
   get raw() {
     return this.__proxy.raw;
   }
