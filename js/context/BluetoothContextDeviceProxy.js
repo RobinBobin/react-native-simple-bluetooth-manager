@@ -31,6 +31,10 @@ export default class BluetoothContextDeviceProxy {
     return this.__proxy.device;
   }
   
+  isConnected() {
+    return this.__state === CONNECTED;
+  }
+  
   isConnecting() {
     return this.__state === CONNECTING;
   }
