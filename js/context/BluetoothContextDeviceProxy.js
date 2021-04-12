@@ -5,15 +5,10 @@ import {
 } from "mobx";
 import BluetoothDeviceProxy from "../proxies/BluetoothDeviceProxy";
 
-const DISCONNECTED = 0;
-const CONNECTING = 1;
-const CONNECTED = 2;
-const SERVICES_DISCOVERED = 3;
-
 export default class BluetoothContextDeviceProxy {
   constructor(deviceId, createDeviceObject) {
     this.__createDeviceObject = createDeviceObject;
-    this.__state = DISCONNECTED;
+    this.__stateTrigger = false;
     
     this.__onConnected = this.__onConnected.bind(this);
     this.__onDisconnected = this.__onDisconnected.bind(this);
@@ -22,21 +17,21 @@ export default class BluetoothContextDeviceProxy {
     this.__createProxy(deviceId);
     
     makeObservable(this, {
-      __setState: action,
-      __state: observable
+      __stateTrigger: observable,
+      __toggleStateTrigger: action
     });
   }
   
-  get device() {
-    return this.__proxy.device;
+  areServicesDiscovered() {
+    const _ = this.__stateTrigger;
+    
+    return this.__proxy.device.areServicesDiscovered();
   }
   
   isConnected() {
-    return this.__state === CONNECTED;
-  }
-  
-  isConnecting() {
-    return this.__state === CONNECTING;
+    const _ = this.__stateTrigger;
+    
+    return this.__proxy.device.isConnected();
   }
   
   async openConnection() {
@@ -44,23 +39,11 @@ export default class BluetoothContextDeviceProxy {
       this.__createProxy(this.__proxy.device.getId());
     }
     
-    const result = await this.__proxy.device.openConnection();
-    
-    this.__setState(CONNECTING);
-    
-    return result;
+    return await this.__proxy.device.openConnection();
   }
   
   get proxy() {
     return this.__proxy;
-  }
-  
-  get raw() {
-    return this.__proxy.raw;
-  }
-  
-  get state() {
-    return this.__state;
   }
   
   __createProxy(deviceId) {
@@ -75,18 +58,18 @@ export default class BluetoothContextDeviceProxy {
   }
   
   __onConnected() {
-    this.__setState(CONNECTED);
+    this.__toggleStateTrigger();
   }
   
   __onDisconnected() {
-    this.__setState(DISCONNECTED);
+    this.__toggleStateTrigger();
   }
   
   __onServicesDiscovered() {
-    this.__setState(SERVICES_DISCOVERED);
+    this.__toggleStateTrigger();
   }
   
-  __setState(state) {
-    this.__state = state;
+  __toggleStateTrigger() {
+    this.__stateTrigger ^= true;
   }
 };
