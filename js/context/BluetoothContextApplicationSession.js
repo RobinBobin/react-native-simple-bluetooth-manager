@@ -28,7 +28,7 @@ export default class BluetoothContextApplicationSession extends ApplicationSessi
   async _switchToBackground() {
     for (let selectedDevice of this._context.selectedDevices) {
       try {
-        await selectedDevice.device.shutdown();
+        await selectedDevice.proxy.device.shutdown();
       } catch (error) {
         console.log(error);
       }
