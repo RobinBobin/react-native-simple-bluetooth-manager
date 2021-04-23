@@ -36,7 +36,7 @@ export default class BluetoothContextDeviceProxy {
   
   async openConnection() {
     if (this.__proxy.device.isShutdownRequested()) {
-      this.__createProxy(this.__proxy.device.getId());
+      this.__createProxy();
     }
     
     return await this.__proxy.device.openConnection();
@@ -47,7 +47,13 @@ export default class BluetoothContextDeviceProxy {
   }
   
   __createProxy(deviceId) {
-    const object = this.__createDeviceObject(deviceId);
+    const params = [deviceId ?? this.__proxy.device.getId()];
+    
+    if (!deviceId) {
+      params.push(this.__proxy);
+    }
+    
+    const object = this.__createDeviceObject(...params);
     
     this.__proxy = object instanceof BluetoothDeviceProxy ? object : new BluetoothDeviceProxy(object);
     
