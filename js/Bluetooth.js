@@ -12,7 +12,7 @@ export default class Bluetooth {
   
   __allowDuplicates = false;
   __discoveredDevices = [];
-  __listeners;
+  __listeners = [];
   __maxDeviceCountToStore = -1;
   __scanMillis = 5000;
   __scanMinMillis = 2000;
@@ -20,10 +20,15 @@ export default class Bluetooth {
   __scanStarted = false;
   
   constructor() {
-    this.__listeners = [
-      [ bt.events.leScanCallback.SCAN_RESULT, this.__onScanResult.bind(this)],
-      [ bt.events.leScanCallback.SCAN_FAILED, this.__onScanFailed.bind(this)]
-    ].map(data => emitter.addListener(data[0], data[1]));
+    this.__listeners.push(emitter.addListener(
+      bt.events.leScanCallback.SCAN_FAILED,
+      this.__onScanFailed.bind(this)));
+    
+    this.__listeners.push(this.addOnScanResultListener(this.__onScanResult.bind(this)));
+  }
+  
+  addOnScanResultListener(listener) {
+    return emitter.addListener(bt.events.leScanCallback.SCAN_RESULT, listener);
   }
   
   getDiscoveredDevices() {
@@ -94,7 +99,11 @@ export default class Bluetooth {
       promises.push(new Promise(async resolve => {
         await new Promise(r => setTimeout(r, this.__scanMinMillis));
         
-        while (!timeoutFired && (this.__maxDeviceCountToStore > this.__discoveredDevices.length)) {
+        while (
+          this.__scanStarted
+          && !timeoutFired
+          && (this.__maxDeviceCountToStore > this.__discoveredDevices.length))
+        {
           await new Promise(r => setTimeout(r, 100));
         }
         
@@ -103,6 +112,14 @@ export default class Bluetooth {
     }
     
     if (promises.length) {
+      promises.push(new Promise(async resolve => {
+        while (this.__scanStarted) {
+          await new Promise(r => setTimeout(r, 100));
+        }
+        
+        resolve();
+      }));
+      
       await Promise.race(promises);
       
       if (await this.stopScan()) {
