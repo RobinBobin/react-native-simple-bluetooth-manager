@@ -1,13 +1,11 @@
 {
   "name": "react-native-simple-bluetooth-manager",
-  "version": "6.2.0",
+  "version": "7.0.0",
   "description": "",
   "main": "index.js",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
-  "peerDependencies": {
-   "react-native-common-utils": "^8.3.0"
+  "dependencies": {
+    "@robinbobin/react-native-application-session": "^0.1.0",
+    "react-native-common-utils": "^8.3.0"
   },
   "repository": {
     "type": "git",

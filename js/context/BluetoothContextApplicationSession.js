@@ -1,6 +1,6 @@
-import { ApplicationSession2 } from "react-native-common-utils";
+import { ApplicationSession } from "@robinbobin/react-native-application-session";
 
-export default class BluetoothContextApplicationSession extends ApplicationSession2 {
+export default class BluetoothContextApplicationSession extends ApplicationSession {
   async _switchToActive() {
     let handlerName;
     
